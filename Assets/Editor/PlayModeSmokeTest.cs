@@ -236,10 +236,146 @@ namespace My4KGame.EditorTools
             // ---------------------------------------------------------- 8. 流速实时调整 / 判定不漂移
             yield return StartCoroutine(ScrollSpeedLiveChecks(gm));
 
+            // ---------------------------------------------------------- 9. 主界面按钮点击链路探针
+            yield return StartCoroutine(MenuButtonChecks(gm));
+
             Finish();
         }
 
         private static bool Nz(UnityEngine.Object o) => o != null;
+
+        /// <summary>
+        /// 主界面按钮探针：把「点击」这条链拆成 4 段分别验证
+        ///   EventSystem 在不在 → 按钮能不能被命中 → 回调有没有被调用 → 数值有没有变。
+        /// 这样就能分清"点不动"是输入没送到、射线被挡、还是回调没绑上。
+        /// </summary>
+        private IEnumerator MenuButtonChecks(GameManager gm)
+        {
+            _lines.Add("[信息] ---- 主界面按钮点击链路 ----");
+
+            gm.EnterMenu();
+            yield return null;
+            yield return null;
+
+            // ---- 1) EventSystem / 输入模块
+            var es = UnityEngine.EventSystems.EventSystem.current;
+            Check(es != null, "场景里有 EventSystem");
+            if (es != null)
+            {
+                Check(es.enabled && es.gameObject.activeInHierarchy, "EventSystem 处于启用状态");
+                var module = es.GetComponent<UnityEngine.EventSystems.StandaloneInputModule>();
+                Check(module != null && module.enabled, "StandaloneInputModule 存在且启用");
+            }
+
+            // ---- 2) 按钮结构与遮挡（注意：Menu 和 HUD 里各有一个 Tap▶，必须按父节点取）
+            MenuView menu = Object.FindObjectOfType<MenuView>();
+            HudView hud = Object.FindObjectOfType<HudView>();
+            GameObject plus = menu != null ? FindChild(menu.transform, "SpeedCard/Tap▶") : null;
+            GameObject calibPlus = menu != null ? FindChild(menu.transform, "CalibrationStepper/Tap+") : null;
+            GameObject hudPlus = hud != null ? FindChild(hud.transform, "SpeedPanel/Tap▶") : null;
+
+            Check(plus != null, "主界面流速卡片的 ▶ 按钮存在");
+            Check(calibPlus != null, "主界面音画校准的 + 按钮存在");
+            Check(hudPlus != null, "游戏内悬浮窗的 ▶ 按钮存在");
+
+            var probeTargets = new List<GameObject>();
+            if (plus != null) probeTargets.Add(plus);
+            if (calibPlus != null) probeTargets.Add(calibPlus);
+            if (hudPlus != null) probeTargets.Add(hudPlus);
+
+            foreach (GameObject go in probeTargets)
+            {
+                if (go == null) continue;
+
+                var img = go.GetComponent<UnityEngine.UI.Image>();
+                var tap = go.GetComponent<TapRepeatButton>();
+                Check(img != null && img.raycastTarget, $"{go.name}：有 Image 且 raycastTarget=true");
+                Check(tap != null, $"{go.name}：挂了 TapRepeatButton");
+                if (tap != null) Check(tap.background != null, $"{go.name}：background 已绑定");
+
+                // 只有"当前应该可见"的面板才检查 CanvasGroup；
+                // HUD 在菜单里本来就是 alpha=0 / 不接收射线（那是正确行为，不是 bug）
+                bool inHud = hud != null && go.transform.IsChildOf(hud.transform);
+                foreach (var cg in go.GetComponentsInParent<CanvasGroup>(true))
+                {
+                    if (inHud)
+                    {
+                        _lines.Add($"[信息] {go.name}：祖先 CanvasGroup「{cg.name}」alpha={cg.alpha:0.00} " +
+                                   $"blocksRaycasts={cg.blocksRaycasts}（菜单态下 HUD 隐藏属正常）");
+                    }
+                    else
+                    {
+                        Check(cg.blocksRaycasts, $"{go.name}：祖先 CanvasGroup「{cg.name}」blocksRaycasts=true");
+                        Check(cg.alpha > 0.9f, $"{go.name}：祖先 CanvasGroup「{cg.name}」alpha={cg.alpha:0.00}");
+                    }
+                }
+
+                var raycaster = go.GetComponentInParent<UnityEngine.UI.GraphicRaycaster>();
+                Check(raycaster != null && raycaster.enabled, $"{go.name}：Canvas 有启用的 GraphicRaycaster");
+            }
+
+            // ---- 3) 绕过射线，直接调回调：验证绑定逻辑本身
+            if (plus != null && plus.GetComponent<TapRepeatButton>() is TapRepeatButton plusTap)
+            {
+                float before = ScrollSpeedState.Value;
+                plusTap.OnPointerDown(new UnityEngine.EventSystems.PointerEventData(es));
+                yield return null;
+                Check(!Mathf.Approximately(ScrollSpeedState.Value, before),
+                    $"直接触发主界面 ▶：流速 {before:0.00} → {ScrollSpeedState.Value:0.00}");
+            }
+
+            if (hudPlus != null && hudPlus.GetComponent<TapRepeatButton>() is TapRepeatButton hudTap)
+            {
+                float before = ScrollSpeedState.Value;
+                hudTap.OnPointerDown(new UnityEngine.EventSystems.PointerEventData(es));
+                yield return null;
+                Check(!Mathf.Approximately(ScrollSpeedState.Value, before),
+                    $"直接触发悬浮窗 ▶：流速 {before:0.00} → {ScrollSpeedState.Value:0.00}");
+            }
+
+            if (calibPlus != null && calibPlus.GetComponent<TapRepeatButton>() is TapRepeatButton calTap && gm != null)
+            {
+                double before = gm.calibrationOffset;
+                calTap.OnPointerDown(new UnityEngine.EventSystems.PointerEventData(es));
+                yield return null;
+                Check(Math.Abs(gm.calibrationOffset - before) > 1e-6,
+                    $"直接触发校准 +：{before * 1000:+0;-0;0}ms → {gm.calibrationOffset * 1000:+0;-0;0}ms");
+            }
+
+            // ---- 4) 真实射线命中（批量模式 Screen 为 0 时跳过）
+            if (plus != null && es != null && Screen.width > 1 && Screen.height > 1)
+            {
+                var rt = (RectTransform)plus.transform;
+                Vector2 screenPoint = UnityEngine.RectTransformUtility.WorldToScreenPoint(
+                    null, rt.TransformPoint(rt.rect.center));
+                var ped = new UnityEngine.EventSystems.PointerEventData(es) { position = screenPoint };
+                var hits = new List<UnityEngine.EventSystems.RaycastResult>();
+                es.RaycastAll(ped, hits);
+                string top = hits.Count > 0 ? hits[0].gameObject.name : "（无命中）";
+                _lines.Add($"[信息] Screen {Screen.width}x{Screen.height}，射线首位命中：{top}");
+                Check(hits.Count > 0, "按钮位置能被 UI 射线命中");
+                if (hits.Count > 0)
+                {
+                    Check(hits[0].gameObject == plus || hits[0].gameObject.transform.IsChildOf(plus.transform),
+                        $"射线首位命中就是 ▶ 按钮（实际 {top}）");
+                }
+            }
+            else
+            {
+                _lines.Add("[信息] 批量模式 Screen 尺寸无效，跳过真实射线测试");
+            }
+
+            gm.SetScrollValue(ScrollSpeedTrack.CenterValue, save: false);
+            gm.EnterMenu();
+            yield return null;
+        }
+
+        private static GameObject FindChild(Transform root, string path)
+        {
+            if (root == null) return null;
+            Transform t = root.Find(path);
+            return t != null ? t.gameObject : null;
+        }
 
         private static bool Nearly(double a, double b) => Math.Abs(a - b) < 0.001;
 

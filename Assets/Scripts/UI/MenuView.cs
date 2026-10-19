@@ -33,6 +33,12 @@ namespace My4KGame
         public Text autoPlayLabel;
         public Button rescanButton;
 
+        [Header("TapRepeatButton 引用（运行时重新绑定回调用）")]
+        public TapRepeatButton speedMinusArrow;
+        public TapRepeatButton speedPlusArrow;
+        public TapRepeatButton calibrationMinus;
+        public TapRepeatButton calibrationPlus;
+
         private GameManager _game;
         private Camera _camera;
         private bool _bound;
@@ -115,6 +121,9 @@ namespace My4KGame
                 UiFactory.Place(calibrationHint.rectTransform, new Vector2(1f, 0.5f), new Vector2(-120f, 120f),
                     new Vector2(700f, 28f), new Vector2(1f, 0.5f));
             }
+
+            // 校准的 − / + 回调每次重新绑定（Action 不序列化，场景里存下来的会失效）
+            BindCalibrationButtons();
 
             // ---- 音符流速：卡片式 UI（大字号居中数值 + 左右箭头 + 实时下落预览）
             EnsureSpeedCard();
@@ -378,6 +387,9 @@ namespace My4KGame
                 if (speedValue == null) speedValue = findChildText("SpeedCardValue");
                 if (speedHint == null) speedHint = findChildText("SpeedCardHint");
                 if (preview == null) preview = existing.GetComponentInChildren<SpeedPreviewView>(true);
+
+                // 关键：场景里存下来的按钮，回调（Action）不会被序列化，必须每次重新绑
+                BindSpeedCardArrows();
                 RefreshSpeedValue();
                 return;
             }
@@ -429,7 +441,41 @@ namespace My4KGame
             preview.root = previewRect;
             preview.EnsureBuilt();
 
+            BindSpeedCardArrows();
             RefreshSpeedValue();
+        }
+
+        /// <summary>
+        /// 重新绑定左右箭头的点击回调。
+        ///
+        /// 为什么必须"每次"绑：`TapRepeatButton` 里存回调的是 C# `Action` 字段，
+        /// **Unity 不序列化委托** —— 编辑器里生成并存进场景的按钮，回到运行时回调就是 null，
+        /// 点上去只会静默失败。所以这里不信任场景里的绑定，进游戏时统一重绑一次。
+        /// </summary>
+        private void BindSpeedCardArrows()
+        {
+            speedMinusArrow = FindTapButton("SpeedCard/Tap◀", speedMinusArrow);
+            speedPlusArrow = FindTapButton("SpeedCard/Tap▶", speedPlusArrow);
+
+            if (speedMinusArrow != null) speedMinusArrow.Bind(() => NudgeSpeed(-ScrollSpeedTrack.Step));
+            if (speedPlusArrow != null) speedPlusArrow.Bind(() => NudgeSpeed(ScrollSpeedTrack.Step));
+        }
+
+        /// <summary>音画校准的 − / + 同样需要每次重绑（原因同上）。</summary>
+        private void BindCalibrationButtons()
+        {
+            calibrationMinus = FindTapButton("CalibrationStepper/Tap−", calibrationMinus);
+            calibrationPlus = FindTapButton("CalibrationStepper/Tap+", calibrationPlus);
+
+            if (calibrationMinus != null) calibrationMinus.Bind(() => NudgeCalibration(-CalibrationStepMs));
+            if (calibrationPlus != null) calibrationPlus.Bind(() => NudgeCalibration(CalibrationStepMs));
+        }
+
+        private TapRepeatButton FindTapButton(string path, TapRepeatButton fallback)
+        {
+            if (fallback != null) return fallback;
+            Transform t = root != null ? root.Find(path) : null;
+            return t != null ? t.GetComponent<TapRepeatButton>() : null;
         }
 
         private void CreateArrow(Transform parent, string label, Vector2 position, System.Action onClick)

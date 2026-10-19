@@ -1,5 +1,5 @@
 =========== My4KGame 冒烟测试 ===========
-2026-10-19 09:54:15
+2026-10-19 12:49:11
 [OK]   GameManager 已就绪，Unity 2022.3.62f3c1
 [OK]   启动后应停在选曲界面（实际 Menu）
 [OK]   HudView 存在
@@ -31,7 +31,7 @@
 [OK]   EnterMenu() 回到选曲界面
 [OK]   回到菜单后清空当前谱面
 [OK]   自动演示：StartSong(NeonPulse_Easy) 成功
-[OK]   自动演示打中了 5 个音符
+[OK]   自动演示打中了 4 个音符
 [OK]   自动演示没有 MISS
 [信息] ---- 流速实时调整 / 判定不漂移（播放模式）----
 [OK]   流速设为 ×0.5
@@ -55,12 +55,42 @@
 [OK]   档位 1.0：音符实际 Y=-1.51，按当前档位映射应为 -1.51（一屏 8.00s）
 [信息] 档位 5.5：系数 ×1.00，一屏 2.00s，ahead=1.99s → 音符 Y=5.96
 [OK]   档位 5.5：音符实际 Y=5.96，按当前档位映射应为 5.96（一屏 2.00s）
-[信息] 档位 10.0：系数 ×4.00，一屏 0.50s，ahead=0.50s → 音符 Y=5.98
-[OK]   档位 10.0：音符实际 Y=5.98，按当前档位映射应为 5.98（一屏 0.50s）
+[信息] 档位 10.0：系数 ×4.00，一屏 0.50s，ahead=0.48s → 音符 Y=5.55
+[OK]   档位 10.0：音符实际 Y=5.55，按当前档位映射应为 5.55（一屏 0.50s）
 [OK]   主界面把流速设成 6.25
 [OK]   进歌后游戏内读到 6.25（应为 6.25，系数 ×1.26）
 [OK]   游戏内调到 7.50
 [OK]   退出歌曲回主界面后仍是 7.50（两边订阅同一个数据源）
 [OK]   流速已持久化：PlayerPrefs["My4KGame.ScrollSpeedValue"] = 7.50
+[信息] ---- 主界面按钮点击链路 ----
+[OK]   场景里有 EventSystem
+[OK]   EventSystem 处于启用状态
+[OK]   StandaloneInputModule 存在且启用
+[OK]   主界面流速卡片的 ▶ 按钮存在
+[OK]   主界面音画校准的 + 按钮存在
+[OK]   游戏内悬浮窗的 ▶ 按钮存在
+[OK]   Tap▶：有 Image 且 raycastTarget=true
+[OK]   Tap▶：挂了 TapRepeatButton
+[OK]   Tap▶：background 已绑定
+[OK]   Tap▶：祖先 CanvasGroup「Menu」blocksRaycasts=true
+[OK]   Tap▶：祖先 CanvasGroup「Menu」alpha=1.00
+[OK]   Tap▶：Canvas 有启用的 GraphicRaycaster
+[OK]   Tap+：有 Image 且 raycastTarget=true
+[OK]   Tap+：挂了 TapRepeatButton
+[OK]   Tap+：background 已绑定
+[OK]   Tap+：祖先 CanvasGroup「Menu」blocksRaycasts=true
+[OK]   Tap+：祖先 CanvasGroup「Menu」alpha=1.00
+[OK]   Tap+：Canvas 有启用的 GraphicRaycaster
+[OK]   Tap▶：有 Image 且 raycastTarget=true
+[OK]   Tap▶：挂了 TapRepeatButton
+[OK]   Tap▶：background 已绑定
+[信息] Tap▶：祖先 CanvasGroup「HUD」alpha=0.00 blocksRaycasts=False（菜单态下 HUD 隐藏属正常）
+[OK]   Tap▶：Canvas 有启用的 GraphicRaycaster
+[OK]   直接触发主界面 ▶：流速 5.50 → 5.75
+[OK]   直接触发悬浮窗 ▶：流速 5.75 → 6.00
+[OK]   直接触发校准 +：+5ms → +10ms
+[信息] Screen 640x480，射线首位命中：Tap▶
+[OK]   按钮位置能被 UI 射线命中
+[OK]   射线首位命中就是 ▶ 按钮（实际 Tap▶）
 结论：通过
 =========================================

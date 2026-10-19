@@ -39,6 +39,8 @@ namespace My4KGame
         public Text autoPlayHint;
         public RectTransform speedPanel;
         public Text speedValueText;
+        public TapRepeatButton speedMinusButton;
+        public TapRepeatButton speedPlusButton;
 
         private GameManager _game;
         private Camera _camera;
@@ -197,6 +199,7 @@ namespace My4KGame
                     Transform value = existing.Find("SpeedPanelValue");
                     if (value != null) speedValueText = value.GetComponent<Text>();
                 }
+                BindSpeedPanelButtons();
                 RefreshSpeedValue();
                 return;
             }
@@ -206,13 +209,11 @@ namespace My4KGame
             UiFactory.Place(speedPanel, new Vector2(0f, 0f), new Vector2(36f, 34f),
                 new Vector2(320f, 96f), new Vector2(0f, 0f));
 
-            UiFactory.CreateTapButton(speedPanel, "◀", new Vector2(0f, 0.5f), new Vector2(10f, 12f),
-                new Vector2(46f, 46f), new Color(1f, 1f, 1f, 0.10f), Theme.TextPrimary, 26,
-                () => ScrollSpeedState.Adjust(-ScrollSpeedTrack.Step));
+            speedMinusButton = UiFactory.CreateTapButton(speedPanel, "◀", new Vector2(0f, 0.5f), new Vector2(10f, 12f),
+                new Vector2(46f, 46f), new Color(1f, 1f, 1f, 0.10f), Theme.TextPrimary, 26, null);
 
-            UiFactory.CreateTapButton(speedPanel, "▶", new Vector2(1f, 0.5f), new Vector2(-10f, 12f),
-                new Vector2(46f, 46f), new Color(1f, 1f, 1f, 0.10f), Theme.TextPrimary, 26,
-                () => ScrollSpeedState.Adjust(ScrollSpeedTrack.Step));
+            speedPlusButton = UiFactory.CreateTapButton(speedPanel, "▶", new Vector2(1f, 0.5f), new Vector2(-10f, 12f),
+                new Vector2(46f, 46f), new Color(1f, 1f, 1f, 0.10f), Theme.TextPrimary, 26, null);
 
             speedValueText = UiFactory.CreateText(speedPanel, "SpeedPanelValue", "5.50", 34,
                 Theme.TextPrimary, TextAnchor.MiddleCenter, FontStyle.Bold);
@@ -224,7 +225,30 @@ namespace My4KGame
             UiFactory.Place(hint.rectTransform, new Vector2(0.5f, 0f), new Vector2(0f, 8f),
                 new Vector2(300f, 22f), new Vector2(0.5f, 0f));
 
+            BindSpeedPanelButtons();
             RefreshSpeedValue();
+        }
+
+        /// <summary>
+        /// 重新绑定悬浮窗左右箭头的回调。
+        /// `TapRepeatButton` 用 C# `Action` 存回调，Unity 不序列化委托 ——
+        /// 场景里存下来的按钮回到运行时回调是 null，必须每次进游戏重绑。
+        /// </summary>
+        private void BindSpeedPanelButtons()
+        {
+            if (speedMinusButton == null && speedPanel != null)
+            {
+                Transform t = speedPanel.Find("Tap◀");
+                if (t != null) speedMinusButton = t.GetComponent<TapRepeatButton>();
+            }
+            if (speedPlusButton == null && speedPanel != null)
+            {
+                Transform t = speedPanel.Find("Tap▶");
+                if (t != null) speedPlusButton = t.GetComponent<TapRepeatButton>();
+            }
+
+            if (speedMinusButton != null) speedMinusButton.Bind(() => ScrollSpeedState.Adjust(-ScrollSpeedTrack.Step));
+            if (speedPlusButton != null) speedPlusButton.Bind(() => ScrollSpeedState.Adjust(ScrollSpeedTrack.Step));
         }
 
         private void RefreshSpeedValue()
