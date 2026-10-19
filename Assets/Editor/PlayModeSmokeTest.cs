@@ -1,0 +1,483 @@
+#if UNITY_EDITOR
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.IO;
+using System.Text;
+using UnityEditor;
+using UnityEditor.SceneManagement;
+using UnityEngine;
+using Object = UnityEngine.Object;
+
+namespace My4KGame.EditorTools
+{
+    /// <summary>
+    /// 播放模式冒烟测试：真的把游戏跑一局，检查"按下 → 判定 → 计分 → 结算"整条链有没有断。
+    ///
+    /// 为什么需要它：编译通过、场景建好，并不代表游戏能玩。
+    /// 空引用、事件没订阅上、暂停后时间跳变，这些问题只有真跑一局才会暴露。
+    /// 所以这里像玩家一样去按 D/F/J/K，然后把结果写成 Docs/smoke_result.txt。
+    ///
+    /// 技术上有个坑：进入播放模式会触发域重载（domain reload），编辑器脚本里的静态状态会被清空，
+    /// 所以不能用"编辑器里挂个 update 回调"的写法，必须靠 EditorPrefs 记下"待办"，等
+    /// playModeStateChanged=EnteredPlayMode 之后再往场景里塞一个驱动器组件（这里用协程写线性代码）。
+    /// </summary>
+    public static class PlayModeSmokeTest
+    {
+        private const string PendingKey = "My4KGame.SmokePending";
+        private static bool _hooked;
+
+        [MenuItem("My4KGame/9. 播放模式冒烟测试（真的跑一局）", false, 9)]
+        public static void RunFromMenu()
+        {
+            if (EditorApplication.isPlaying)
+            {
+                EditorUtility.DisplayDialog("My4KGame", "先停止当前的播放状态。", "好");
+                return;
+            }
+            RunFromCommandLine();
+        }
+
+        /// <summary>开始测试。真正的驱动由 <see cref="SmokeDriver"/> 在播放模式里执行。</summary>
+        public static void RunFromCommandLine()
+        {
+            EditorPrefs.SetBool(PendingKey, true);
+            TryHook();
+
+            if (!EditorApplication.isPlaying)
+            {
+                if (File.Exists(ProjectBuilder.ScenePath))
+                {
+                    EditorSceneManager.OpenScene(ProjectBuilder.ScenePath, OpenSceneMode.Single);
+                }
+                EditorApplication.isPlaying = true;
+            }
+        }
+
+        [InitializeOnLoadMethod]
+        private static void OnLoad()
+        {
+            if (EditorPrefs.GetBool(PendingKey, false)) TryHook();
+        }
+
+        private static void TryHook()
+        {
+            if (_hooked) return;
+            _hooked = true;
+            EditorApplication.playModeStateChanged += OnPlayModeChanged;
+        }
+
+        private static void OnPlayModeChanged(PlayModeStateChange change)
+        {
+            if (change != PlayModeStateChange.EnteredPlayMode) return;
+            if (!EditorPrefs.GetBool(PendingKey, false)) return;
+
+            EditorPrefs.DeleteKey(PendingKey);
+            EditorApplication.playModeStateChanged -= OnPlayModeChanged;
+            _hooked = false;
+
+            var go = new GameObject("My4KGameSmokeDriver");
+            go.AddComponent<SmokeDriver>();
+        }
+    }
+
+    /// <summary>播放在播放模式里跑的那段测试脚本。用协程写，读起来就是一步步的操作。</summary>
+    public sealed class SmokeDriver : MonoBehaviour
+    {
+        private const string ResultPath = "Docs/smoke_result.txt";
+        private readonly List<string> _lines = new List<string>();
+        private bool _failed;
+
+        private void Start()
+        {
+            StartCoroutine(Run());
+        }
+
+        private void Check(bool condition, string message)
+        {
+            if (condition)
+            {
+                _lines.Add("[OK]   " + message);
+            }
+            else
+            {
+                _failed = true;
+                _lines.Add("[失败] " + message);
+            }
+        }
+
+        private IEnumerator Run()
+        {
+            float deadline = Time.realtimeSinceStartup + 120f;
+
+            // ---------------------------------------------------------- 1. 等游戏起来
+            GameManager gm = null;
+            while (gm == null && Time.realtimeSinceStartup < deadline)
+            {
+                gm = GameManager.Instance;
+                yield return null;
+            }
+            yield return null;   // 让各个 View 的 Awake/Start 都跑完
+
+            if (gm == null)
+            {
+                Check(false, "GameManager.Instance 没有创建出来（WorldBuilder 失败？）");
+                Finish();
+                yield break;
+            }
+            Check(true, "GameManager 已就绪，Unity " + Application.unityVersion);
+
+            Check(gm.State == GameState.Menu, $"启动后应停在选曲界面（实际 {gm.State}）");
+            Check(Nz(Object.FindObjectOfType<HudView>()), "HudView 存在");
+            Check(Nz(Object.FindObjectOfType<MenuView>()), "MenuView 存在");
+            Check(Nz(Object.FindObjectOfType<ResultView>()), "ResultView 存在");
+            Check(Nz(Object.FindObjectOfType<NoteSpawner>()), "NoteSpawner 存在");
+            Check(CountLanes() == PlayfieldLayout.LaneCount, $"{PlayfieldLayout.LaneCount} 条轨道都在");
+
+            // ---------------------------------------------------------- 2. 开谱
+            gm.autoPlay = false;
+            Check(gm.StartSong("ManualTest"), "StartSong(ManualTest) 成功");
+            Check(gm.State == GameState.Countdown, $"开谱后应进入倒计时（实际 {gm.State}）");
+            Check(gm.Score.TotalNotes == 4, $"分数系统拿到 4 个音符（实际 {gm.Score.TotalNotes}）");
+            Check(gm.Score.Score == 0, "开局分数是 0");
+
+            // ---------------------------------------------------------- 3. 等倒计时结束
+            while (gm.State == GameState.Countdown && Time.realtimeSinceStartup < deadline)
+            {
+                yield return null;
+            }
+            Check(gm.State == GameState.Playing, $"倒计时结束后进入 Playing（实际 {gm.State}）");
+
+            // 没有音符的地方按键 = 空打，不该加分
+            long scoreBefore = gm.Score.Score;
+            Judgement emptyTap = gm.PressLane(3);
+            Check(emptyTap == Judgement.None, "附近没有音符时按键判空打（Judgement.None）");
+            Check(gm.Score.Score == scoreBefore, "空打不加分");
+
+            // ---------------------------------------------------------- 4. 像玩家一样把 4 个键按掉
+            float[] noteTimes = { 2.0f, 3.0f, 4.0f, 5.0f };
+            int[] noteLanes = { 0, 1, 2, 3 };
+            int pressIndex = 0;
+            bool pauseTested = false;
+            int emptyResults = 0;
+
+            while (gm.State != GameState.Result && Time.realtimeSinceStartup < deadline)
+            {
+                if (gm.State == GameState.Playing)
+                {
+                    double songTime = gm.SongTime;
+
+                    if (pressIndex < noteTimes.Length && songTime >= noteTimes[pressIndex] - 0.01)
+                    {
+                        Judgement result = gm.PressLane(noteLanes[pressIndex]);
+                        if (result == Judgement.None) emptyResults++;
+                        pressIndex++;
+                    }
+
+                    // 按掉两个音符之后，测一次暂停 / 恢复
+                    if (pressIndex >= 2 && !pauseTested)
+                    {
+                        pauseTested = true;
+
+                        gm.Pause();
+                        Check(gm.State == GameState.Paused, "Pause() 之后状态是 Paused");
+
+                        yield return new WaitForSecondsRealtime(0.30f);
+                        double frozen = gm.SongTime;
+                        yield return new WaitForSecondsRealtime(0.20f);
+                        Check(Math.Abs(gm.SongTime - frozen) < 0.002, "暂停期间歌曲时间冻结");
+
+                        gm.Resume();
+                        Check(gm.State == GameState.Playing, "Resume() 之后状态回到 Playing");
+
+                        // 恢复后歌曲时间应该继续往前走，不能跳
+                        double afterResume = gm.SongTime;
+                        yield return null;
+                        yield return null;
+                        Check(gm.SongTime >= afterResume - 0.001, "恢复后歌曲时间继续前进");
+                    }
+                }
+
+                yield return null;
+            }
+
+            // ---------------------------------------------------------- 5. 结算检查
+            Check(gm.State == GameState.Result, $"歌曲播完进入结算（实际 {gm.State}）");
+            Check(emptyResults == 0, $"4 次按键全部命中音符（空打 {emptyResults} 次）");
+            Check(gm.Score.JudgedNotes == 4, $"4 个音符都被判定（实际 {gm.Score.JudgedNotes}）");
+            Check(gm.Score.Count(Judgement.Miss) == 0, "没有 MISS（按键时机正确）");
+            Check(gm.Score.Count(Judgement.Perfect) + gm.Score.Count(Judgement.Great) >= 3,
+                $"大多数判定在 PERFECT/GREAT（PERFECT {gm.Score.Count(Judgement.Perfect)} / GREAT {gm.Score.Count(Judgement.Great)}）");
+            Check(gm.Score.Score > 0, $"结算分数大于 0（{gm.Score.Score:N0}）");
+            Check(!string.IsNullOrEmpty(gm.Score.Rank) && gm.Score.Rank != "-", $"评级有效（{gm.Score.Rank}）");
+            Check(!gm.IsSongRunning, "结算后歌曲时钟已停");
+            _lines.Add("[信息] " + gm.Score.Summary());
+            _lines.Add($"[信息] 新纪录标记：{gm.IsNewBest}");
+
+            // ---------------------------------------------------------- 6. 返回选曲
+            gm.EnterMenu();
+            yield return null;
+            Check(gm.State == GameState.Menu, "EnterMenu() 回到选曲界面");
+            Check(gm.Score.Score == 0 || gm.Chart == null, "回到菜单后清空当前谱面");
+
+            // ---------------------------------------------------------- 7. 自动演示跑一小段
+            gm.autoPlay = true;
+            Check(gm.StartSong("NeonPulse_Easy"), "自动演示：StartSong(NeonPulse_Easy) 成功");
+            while (gm.State == GameState.Countdown && Time.realtimeSinceStartup < deadline) yield return null;
+
+            float demoUntil = Time.realtimeSinceStartup + 6f;
+            while (Time.realtimeSinceStartup < demoUntil && gm.State == GameState.Playing)
+            {
+                yield return null;
+            }
+            Check(gm.Score.JudgedNotes > 0, $"自动演示打中了 {gm.Score.JudgedNotes} 个音符");
+            Check(gm.Score.Count(Judgement.Miss) == 0, "自动演示没有 MISS");
+
+            // ---------------------------------------------------------- 8. 流速实时调整 / 判定不漂移
+            yield return StartCoroutine(ScrollSpeedLiveChecks(gm));
+
+            Finish();
+        }
+
+        private static bool Nz(UnityEngine.Object o) => o != null;
+
+        private static bool Nearly(double a, double b) => Math.Abs(a - b) < 0.001;
+
+        /// <summary>
+        /// 流速专项：在真实游玩状态里验证需求文档 §5 的验收项 1/2/3/4/5/6。
+        ///
+        /// 做法：以 0.5x / 1x / 2x 各开一局 ManualTest，等第 1 个音符（lane0 @ 2000ms）出现后
+        ///   · 运行中切换流速 → 断言该音符的 judgeTimeMs 一个毫秒都没变；
+        ///   · 把音符的 transform 挪到 y=40（荒谬位置）再用"判定时间戳 +20ms"去按 →
+        ///     断言仍然是 PERFECT（证明判定完全不看屏幕坐标）；
+        ///   · 三种流速下的判定结果必须完全一致。
+        /// </summary>
+        private IEnumerator ScrollSpeedLiveChecks(GameManager gm)
+        {
+            _lines.Add("[信息] ---- 流速实时调整 / 判定不漂移（播放模式）----");
+
+            if (gm.spawner == null)
+            {
+                Check(false, "GameManager.spawner 为空，无法做流速验证");
+                yield break;
+            }
+
+            float[] speeds = { 0.5f, 1f, 2f };
+            var verdicts = new List<Judgement>();
+            double windowBefore = gm.PerfectWindowMs;
+            bool windowStable = true;
+
+            foreach (float speed in speeds)
+            {
+                gm.SetScrollSpeed(speed, immediate: true, save: false);
+                Check(Mathf.Abs(gm.ScrollSpeed - speed) < 0.001f, $"流速设为 ×{speed:0.0}");
+
+                gm.autoPlay = false;
+                if (!gm.StartSong("ManualTest"))
+                {
+                    Check(false, $"×{speed:0.0}：StartSong(ManualTest) 失败");
+                    continue;
+                }
+
+                float deadline = Time.realtimeSinceStartup + 10f;
+                while (gm.State == GameState.Countdown && Time.realtimeSinceStartup < deadline) yield return null;
+
+                // 找到 lane0 的第一个音符（它可能就是被上一轮判掉的那个，所以每轮重新开谱）
+                NoteController target = null;
+                deadline = Time.realtimeSinceStartup + 5f;
+                while (Time.realtimeSinceStartup < deadline)
+                {
+                    foreach (NoteController note in gm.spawner.ActiveNotes)
+                    {
+                        if (note != null && note.IsAlive && note.Data != null && note.Data.lane == 0)
+                        {
+                            target = note;
+                            break;
+                        }
+                    }
+                    if (target != null) break;
+                    yield return null;
+                }
+
+                if (target == null)
+                {
+                    Check(false, $"×{speed:0.0}：等不到 lane0 的音符");
+                    gm.EnterMenu();
+                    continue;
+                }
+
+                double judgeTimeMs = target.Data.JudgeTimeMs;
+
+                // ① 运行中改流速：已生成音符的判定时间戳必须纹丝不动
+                float other = Mathf.Approximately(speed, 1f) ? 2f : 1f;
+                gm.SetScrollSpeed(other, immediate: true, save: false);
+                yield return null;
+                Check(Nearly(target.Data.JudgeTimeMs, judgeTimeMs),
+                    $"×{speed:0.0}→×{other:0.0} 运行中调速：该音符 judgeTimeMs 仍是 {judgeTimeMs:F1}ms");
+
+                windowStable &= Nearly(gm.PerfectWindowMs, windowBefore);
+
+                // 切回本轮的流速，让这一轮有一个确定的视觉速度
+                gm.SetScrollSpeed(speed, immediate: true, save: false);
+                yield return null;
+
+                // ② 判定不得读取屏幕坐标：把音符挪到荒谬位置再判
+                target.transform.position = new Vector3(99f, 40f, 0f);
+                Judgement verdict = gm.spawner.ResolvePress(0, target.Data.JudgeTimeSeconds + 0.020);
+                verdicts.Add(verdict);
+                _lines.Add($"[信息] ×{speed:0.0}：+20ms 击打（音符被挪到 y=40）→ {JudgementInfo.ToText(verdict)}");
+                Check(verdict == Judgement.Perfect,
+                    $"×{speed:0.0}：+20ms 应判 PERFECT（实际 {JudgementInfo.ToText(verdict)}）");
+
+                gm.EnterMenu();
+                yield return null;
+            }
+
+            // ③ 三种流速的判定结果必须一致
+            bool same = verdicts.Count == speeds.Length && verdicts.TrueForAll(v => v == verdicts[0]);
+            Check(same, "×0.5 / ×1 / ×2 三档流速下相同击打偏移 → 判定一致：" +
+                        string.Join(" / ", verdicts.ConvertAll(JudgementInfo.ToText)));
+            Check(windowStable, $"调速全程 PERFECT 窗口始终是 ±{windowBefore:F0}ms");
+
+            // ④ 视觉映射确实随流速变化（用纯映射验证，避免被出生点/判定线夹住）
+            ScrollSpeedTrack track = gm.Scroll;
+            track.SetCoefficient(1f, immediate: true);
+            float y1 = track.SecondsAheadToY(0.5f);
+            track.SetCoefficient(2f, immediate: true);
+            float y2 = track.SecondsAheadToY(0.5f);
+            Check(y2 > y1 + 0.5f, $"同一时间差 0.5s：1x → y={y1:F2}，2x → y={y2:F2}（视觉距离变大了）");
+
+            // ⑤ 加减按钮步进：按一次 +0.25 立刻生效，判定窗口一个字节都不动
+            gm.SetScrollValue(ScrollSpeedTrack.CenterValue, save: false);
+            float levelBefore = gm.ScrollValue;
+            gm.AdjustScrollValue(ScrollSpeedTrack.Step);
+            Check(Mathf.Abs(gm.ScrollValue - (levelBefore + ScrollSpeedTrack.Step)) < 0.001f,
+                $"按钮 +0.25：{levelBefore:0.00} → {gm.ScrollValue:0.00}（×{gm.ScrollSpeed:0.00}）");
+            Check(Nearly(gm.PerfectWindowMs, windowBefore), $"调档后 PERFECT 窗口仍是 ±{windowBefore:F0}ms");
+            gm.AdjustScrollValue(-ScrollSpeedTrack.Step);
+
+            // ⑥ 端到端：不同档位下，真实音符在屏幕上的位置必须按当前档位映射
+            //    （这才是"流速到底有没有真的改变音符速度"的证据，而不是只测公式）
+            float[] levels = { ScrollSpeedTrack.MinValue, ScrollSpeedTrack.CenterValue, ScrollSpeedTrack.MaxValue };
+            foreach (float level in levels)
+            {
+                gm.SetScrollValue(level, save: false);
+                if (!gm.StartSong("ManualTest"))
+                {
+                    Check(false, $"档位 {level:0.0}：StartSong 失败");
+                    continue;
+                }
+
+                float waitUntil = Time.realtimeSinceStartup + 12f;
+                while (gm.State == GameState.Countdown && Time.realtimeSinceStartup < waitUntil) yield return null;
+
+                NoteController sample = null;
+                waitUntil = Time.realtimeSinceStartup + 6f;
+                while (Time.realtimeSinceStartup < waitUntil)
+                {
+                    foreach (NoteController note in gm.spawner.ActiveNotes)
+                    {
+                        if (note != null && note.IsAlive && note.Data != null) { sample = note; break; }
+                    }
+                    if (sample != null) break;
+                    yield return null;
+                }
+
+                if (sample == null)
+                {
+                    Check(false, $"档位 {level:0.0}：等不到音符");
+                    gm.EnterMenu();
+                    continue;
+                }
+
+                float ahead = ScrollSpeedTrack.SecondsAheadOf(sample.Data.JudgeTimeMs, gm.SongTime);
+                float expectedY = gm.Scroll.SecondsAheadToY(ahead);
+                float actualY = sample.transform.position.y;
+                float travel = gm.Scroll.TravelSeconds;
+
+                _lines.Add($"[信息] 档位 {level:0.0}：系数 ×{gm.ScrollSpeed:0.00}，一屏 {travel:0.00}s，" +
+                           $"ahead={ahead:0.00}s → 音符 Y={actualY:0.00}");
+                Check(ahead > 0f && Mathf.Abs(actualY - expectedY) < 0.25f,
+                    $"档位 {level:0.0}：音符实际 Y={actualY:0.00}，按当前档位映射应为 {expectedY:0.00}（一屏 {travel:0.00}s）");
+
+                gm.EnterMenu();
+                yield return null;
+            }
+
+            // ⑦ 主界面 ⇄ 游戏内 同步 + 持久化
+            ScrollSpeedState.Set(6.25f);
+            Check(Mathf.Abs(ScrollSpeedState.Value - 6.25f) < 0.001f, "主界面把流速设成 6.25");
+
+            gm.StartSong("ManualTest");
+            yield return null;
+            Check(Mathf.Abs(gm.ScrollValue - 6.25f) < 0.001f &&
+                  Mathf.Abs(gm.ScrollSpeed - ScrollSpeedTrack.ValueToCoefficient(6.25f)) < 0.01f,
+                $"进歌后游戏内读到 {gm.ScrollValue:0.00}（应为 6.25，系数 ×{gm.ScrollSpeed:0.00}）");
+
+            gm.AdjustScrollValue(1.25f);   // 6.25 → 7.50
+            Check(Mathf.Abs(ScrollSpeedState.Value - 7.50f) < 0.001f,
+                $"游戏内调到 {ScrollSpeedState.Value:0.00}");
+
+            gm.EnterMenu();
+            yield return null;
+            Check(Mathf.Abs(ScrollSpeedState.Value - 7.50f) < 0.001f,
+                $"退出歌曲回主界面后仍是 {ScrollSpeedState.Value:0.00}（两边订阅同一个数据源）");
+
+            string savedRaw = PlayerPrefs.GetString(ScrollSpeedState.PrefKey, "");
+            Check(float.TryParse(savedRaw, System.Globalization.NumberStyles.Float,
+                      System.Globalization.CultureInfo.InvariantCulture, out float savedValue) &&
+                  Mathf.Abs(savedValue - 7.50f) < 0.001f,
+                $"流速已持久化：PlayerPrefs[\"{ScrollSpeedState.PrefKey}\"] = {savedRaw}");
+
+            gm.SetScrollValue(ScrollSpeedTrack.CenterValue, save: true);
+            gm.EnterMenu();
+            yield return null;
+        }
+
+        private static int CountLanes()
+        {
+            int count = 0;
+            foreach (LaneView lane in Object.FindObjectsOfType<LaneView>(true))
+            {
+                if (lane != null) count++;
+            }
+            return count;
+        }
+
+        private void Finish()
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("=========== My4KGame 冒烟测试 ===========");
+            sb.AppendLine(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+            foreach (string line in _lines) sb.AppendLine(line);
+            sb.AppendLine(_failed ? "结论：失败" : "结论：通过");
+            sb.AppendLine("=========================================");
+
+            try
+            {
+                Directory.CreateDirectory("Docs");
+                File.WriteAllText(ResultPath, sb.ToString(), new UTF8Encoding(false));
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError("[My4KGame] 写测试结果失败：" + ex.Message);
+            }
+
+            Debug.Log(sb.ToString());
+            Debug.Log(_failed ? "[My4KGame] SMOKE_RESULT=FAIL" : "[My4KGame] SMOKE_RESULT=PASS");
+
+            if (Application.isBatchMode)
+            {
+                EditorApplication.Exit(_failed ? 1 : 0);
+            }
+            else
+            {
+                EditorUtility.DisplayDialog("My4KGame 冒烟测试",
+                    (_failed ? "发现问题，详情见 Docs/smoke_result.txt" : "全部通过！详情见 Docs/smoke_result.txt"),
+                    "好");
+                EditorApplication.isPlaying = false;
+            }
+        }
+    }
+}
+#endif

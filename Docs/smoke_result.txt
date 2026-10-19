@@ -1,0 +1,66 @@
+=========== My4KGame 冒烟测试 ===========
+2026-10-19 09:54:15
+[OK]   GameManager 已就绪，Unity 2022.3.62f3c1
+[OK]   启动后应停在选曲界面（实际 Menu）
+[OK]   HudView 存在
+[OK]   MenuView 存在
+[OK]   ResultView 存在
+[OK]   NoteSpawner 存在
+[OK]   4 条轨道都在
+[OK]   StartSong(ManualTest) 成功
+[OK]   开谱后应进入倒计时（实际 Countdown）
+[OK]   分数系统拿到 4 个音符（实际 4）
+[OK]   开局分数是 0
+[OK]   倒计时结束后进入 Playing（实际 Playing）
+[OK]   附近没有音符时按键判空打（Judgement.None）
+[OK]   空打不加分
+[OK]   Pause() 之后状态是 Paused
+[OK]   暂停期间歌曲时间冻结
+[OK]   Resume() 之后状态回到 Playing
+[OK]   恢复后歌曲时间继续前进
+[OK]   歌曲播完进入结算（实际 Result）
+[OK]   4 次按键全部命中音符（空打 0 次）
+[OK]   4 个音符都被判定（实际 4）
+[OK]   没有 MISS（按键时机正确）
+[OK]   大多数判定在 PERFECT/GREAT（PERFECT 4 / GREAT 0）
+[OK]   结算分数大于 0（1,000,000）
+[OK]   评级有效（SSS）
+[OK]   结算后歌曲时钟已停
+[信息] 分数 1,000,000 / 1,000,000   准确率 100.00%   评级 SSS   最大连击 4   PERFECT 4 / GREAT 0 / GOOD 0 / MISS 0
+[信息] 新纪录标记：False
+[OK]   EnterMenu() 回到选曲界面
+[OK]   回到菜单后清空当前谱面
+[OK]   自动演示：StartSong(NeonPulse_Easy) 成功
+[OK]   自动演示打中了 5 个音符
+[OK]   自动演示没有 MISS
+[信息] ---- 流速实时调整 / 判定不漂移（播放模式）----
+[OK]   流速设为 ×0.5
+[OK]   ×0.5→×1.0 运行中调速：该音符 judgeTimeMs 仍是 2000.0ms
+[信息] ×0.5：+20ms 击打（音符被挪到 y=40）→ PERFECT
+[OK]   ×0.5：+20ms 应判 PERFECT（实际 PERFECT）
+[OK]   流速设为 ×1.0
+[OK]   ×1.0→×2.0 运行中调速：该音符 judgeTimeMs 仍是 2000.0ms
+[信息] ×1.0：+20ms 击打（音符被挪到 y=40）→ PERFECT
+[OK]   ×1.0：+20ms 应判 PERFECT（实际 PERFECT）
+[OK]   流速设为 ×2.0
+[OK]   ×2.0→×1.0 运行中调速：该音符 judgeTimeMs 仍是 2000.0ms
+[信息] ×2.0：+20ms 击打（音符被挪到 y=40）→ PERFECT
+[OK]   ×2.0：+20ms 应判 PERFECT（实际 PERFECT）
+[OK]   ×0.5 / ×1 / ×2 三档流速下相同击打偏移 → 判定一致：PERFECT / PERFECT / PERFECT
+[OK]   调速全程 PERFECT 窗口始终是 ±40ms
+[OK]   同一时间差 0.5s：1x → y=-1.50，2x → y=1.00（视觉距离变大了）
+[OK]   按钮 +0.25：5.50 → 5.75（×1.08）
+[OK]   调档后 PERFECT 窗口仍是 ±40ms
+[信息] 档位 1.0：系数 ×0.25，一屏 8.00s，ahead=1.99s → 音符 Y=-1.51
+[OK]   档位 1.0：音符实际 Y=-1.51，按当前档位映射应为 -1.51（一屏 8.00s）
+[信息] 档位 5.5：系数 ×1.00，一屏 2.00s，ahead=1.99s → 音符 Y=5.96
+[OK]   档位 5.5：音符实际 Y=5.96，按当前档位映射应为 5.96（一屏 2.00s）
+[信息] 档位 10.0：系数 ×4.00，一屏 0.50s，ahead=0.50s → 音符 Y=5.98
+[OK]   档位 10.0：音符实际 Y=5.98，按当前档位映射应为 5.98（一屏 0.50s）
+[OK]   主界面把流速设成 6.25
+[OK]   进歌后游戏内读到 6.25（应为 6.25，系数 ×1.26）
+[OK]   游戏内调到 7.50
+[OK]   退出歌曲回主界面后仍是 7.50（两边订阅同一个数据源）
+[OK]   流速已持久化：PlayerPrefs["My4KGame.ScrollSpeedValue"] = 7.50
+结论：通过
+=========================================
