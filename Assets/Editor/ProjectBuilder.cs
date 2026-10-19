@@ -4,6 +4,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using UnityEditor;
+using UnityEditor.Build;
+using UnityEditor.Build.Reporting;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -748,6 +750,79 @@ namespace My4KGame.EditorTools
                 return false;
             }
             return true;
+        }
+
+        // ================================================================ 打包 Windows 版
+        [MenuItem("My4KGame/11. 打包 Windows 版（生成 exe）", false, 11)]
+        public static void BuildWindowsMenu()
+        {
+            string output = BuildWindowsPlayer();
+            if (!Application.isBatchMode)
+            {
+                EditorUtility.DisplayDialog("My4KGame",
+                    string.IsNullOrEmpty(output)
+                        ? "打包失败，请看 Console 的红色报错。"
+                        : "打包完成：\n" + output + "\n\n把 Build 文件夹整体压缩发给别人，双击 My4KGame.exe 就能玩。",
+                    "好");
+            }
+        }
+
+        /// <summary>
+        /// 打出 Windows 64 位可执行文件（Mono 后端，不需要额外装 IL2CPP 模块）。
+        /// 输出到工程目录的上一级：&lt;工程父目录&gt;/Build/My4KGame.exe，
+        /// 这样 Build 不会落在仓库里被误提交。
+        /// </summary>
+        public static string BuildWindowsPlayer()
+        {
+            if (!File.Exists(ScenePath)) BuildScene();
+
+            var scenes = new List<EditorBuildSettingsScene>(EditorBuildSettings.scenes);
+            if (scenes.FindIndex(s => s.path == ScenePath) < 0)
+            {
+                scenes.Insert(0, new EditorBuildSettingsScene(ScenePath, true));
+                EditorBuildSettings.scenes = scenes.ToArray();
+            }
+
+            PlayerSettings.SetScriptingBackend(BuildTargetGroup.Standalone, ScriptingImplementation.Mono2x);
+            PlayerSettings.fullScreenMode = FullScreenMode.Windowed;
+            PlayerSettings.defaultScreenWidth = 1920;
+            PlayerSettings.defaultScreenHeight = 1080;
+            PlayerSettings.runInBackground = true;
+            PlayerSettings.resizableWindow = true;
+
+            string projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+            string buildDir = Path.GetFullPath(Path.Combine(projectRoot, "..", "Build"));
+            Directory.CreateDirectory(buildDir);
+            string exePath = Path.Combine(buildDir, "My4KGame.exe");
+
+            var options = new BuildPlayerOptions
+            {
+                scenes = new[] { ScenePath },
+                locationPathName = exePath,
+                target = BuildTarget.StandaloneWindows64,
+                targetGroup = BuildTargetGroup.Standalone,
+                options = BuildOptions.None,
+            };
+
+            BuildReport report = BuildPipeline.BuildPlayer(options);
+            BuildSummary summary = report.summary;
+
+            Debug.Log($"[My4KGame] 打包结果：{summary.result}  " +
+                      $"大小 {summary.totalSize / 1048576.0:F1} MB  耗时 {summary.totalTime.TotalSeconds:F0}s  " +
+                      $"输出 {exePath}");
+
+            return summary.result == BuildResult.Succeeded ? exePath : null;
+        }
+
+        /// <summary>命令行入口：只打包，然后退出。</summary>
+        public static void BuildWindowsFromCommandLine()
+        {
+            string path = null;
+            try { path = BuildWindowsPlayer(); }
+            catch (Exception ex) { Debug.LogError("[My4KGame] 打包异常：" + ex); }
+
+            Debug.Log(path != null ? "[My4KGame] BUILD_RESULT=OK " + path : "[My4KGame] BUILD_RESULT=FAILED");
+            if (Application.isBatchMode) EditorApplication.Exit(path != null ? 0 : 1);
         }
 
         // ================================================================ 命令行入口
