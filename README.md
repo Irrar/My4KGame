@@ -2,9 +2,9 @@
 
 > 按《Unity 4K 音游制作手册》做，并且把它**做完了**。
 > 手册第 4 章那四个脚本（NoteData / GameManager / NoteController / NoteSpawner）一个不少，
-> 在此基础上补齐了"能当作品交出去"需要的一切：选曲、三档难度、分级判定、连击计分、
-> 结算评级、暂停恢复、音画校准、**流速可调（判定不受影响）**、对象池、自动演示、
-> 编辑器自检工具、自动化冒烟测试。
+> 在此基础上补齐了"能当作品交出去"需要的一切：选曲、五档难度（Easy / Normal / Hard / Expert / Master）、
+> 分级判定、连击计分、结算评级、暂停恢复、音画校准、**流速可调（判定不受影响）**、
+> **Hold 长按（含持续光效）**、对象池、自动演示、编辑器自检工具、自动化冒烟测试。
 
 ![选曲界面](Docs/preview_menu.png)
 ![游玩画面](Docs/preview_play.png)
@@ -247,7 +247,7 @@ PERFECT 窗口 ±40ms 直接吃掉 42%。`AudioSettings.dspTime` 由声卡采样
 | `audio` | `Assets/Resources/Audio/` 下不带后缀的文件名 |
 | `offset` | 整张谱面平移（秒），正值 = 所有音符往后挪 |
 | `bpmChanges` | 可选：`[{"beat":16,"bpm":150}]` 这样的变速表，加载时按段落积分成毫秒 |
-| `difficulty` / `level` | 显示用（Easy/Normal/Hard/自定义 + 1~10） |
+| `difficulty` / `level` | 显示用（Easy / Normal / Hard / Expert / Master / 自定义，level 数字越大排越后） |
 
 > 用 `beat` 写谱的好处：改 BPM 不用重算时间。换算只在加载时做一次，
 > 结果烘进 `NoteData.JudgeTimeMs`，之后调速、暂停都不会动它。
@@ -272,8 +272,15 @@ PERFECT 窗口 ±40ms 直接吃掉 42%。`AudioSettings.dspTime` 由声卡采样
 | `NeonPulse_Easy.json` | 88 音符，四分音符为主，适合第一次上手 |
 | `NeonPulse_Normal.json` | 135 音符，八分音符 + 少量双押 |
 | `NeonPulse_Hard.json` | 223 音符，八分连打 + 双押 + 交替 |
+| `NeonPulse_Master.json` | 411 音符 / 5.87 音符每秒，16 分加密，几乎无空档 |
 | `NeonPulse_Calibration.json` | 34 个音符，每秒一个、四轨轮转，用来确认自己的手感/延迟 |
+| `WorldsEndBLACKBOX_*.json` | 205 BPM，Easy 114 / Normal 179 / Hard 275 / Expert 442 / **Master 1245（7.98 音符每秒）** |
+| `InYourBlueEyes_*.json` | 145 BPM，Easy 113 / Normal 189 / Hard 331 / Expert 423 / **Master 1374（6.43 音符每秒）** |
 | `ManualTest.json` | 手册第 6 章那个 4 音符测试谱面 |
+
+> Master 难度由 `tools/make_master.py` 生成：以同曲 Expert（Neon Pulse 用 Hard）的时间戳为**采音锚点**，
+> 按 16/8 分网格加密、局部密度封顶、并保证任何空档 ≤ 600ms —— 即"全程没有空白休息段"。
+> 觉得太简单就改脚本顶部的 `nps` 重新生成。
 
 音乐和谱面是同一个脚本按同一套节拍表生成的，所以**音符一定踩在鼓点上**，不会出现"谱面和音乐对不上"。
 

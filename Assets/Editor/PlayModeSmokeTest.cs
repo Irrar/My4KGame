@@ -248,10 +248,59 @@ namespace My4KGame.EditorTools
             // ---------------------------------------------------------- 10. Hold 长按交互
             yield return StartCoroutine(HoldInteractionChecks(gm));
 
+            // ---------------------------------------------------------- 11. Master 超密谱面
+            yield return StartCoroutine(MasterChartChecks(gm));
+
             Finish();
         }
 
         private static bool Nz(UnityEngine.Object o) => o != null;
+
+        /// <summary>
+        /// Master（大师）难度冒烟：超密谱面（1245 个音符 / 7.98 音符每秒）能不能正常加载、
+        /// 自动演示会不会漏谱或卡死。自动演示 = 每个音符都恰好按在判定时间上，
+        /// 所以只要没有 MISS，就说明这张谱"每个音符都打得出来"。
+        /// </summary>
+        private IEnumerator MasterChartChecks(GameManager gm)
+        {
+            _lines.Add("[信息] ---- Master 难度（超密谱面）----");
+
+            if (gm == null || gm.spawner == null)
+            {
+                Check(false, "GameManager / NoteSpawner 为空，无法验证 Master");
+                yield break;
+            }
+
+            gm.autoPlay = true;
+            if (!gm.StartSong("WorldsEndBLACKBOX_Master"))
+            {
+                Check(false, "StartSong(WorldsEndBLACKBOX_Master) 失败");
+                gm.autoPlay = false;
+                yield break;
+            }
+
+            Check(gm.Score.TotalNotes > 1000, $"Master 谱面加载了 {gm.Score.TotalNotes} 个音符（应 >1000）");
+
+            float deadline = Time.realtimeSinceStartup + 14f;
+            while (Time.realtimeSinceStartup < deadline && gm.Score.JudgedNotes < 60) yield return null;
+
+            Check(gm.Score.JudgedNotes >= 60,
+                $"自动演示 {gm.Score.JudgedNotes} 个音符（前 14 秒）");
+            Check(gm.Score.Count(Judgement.Miss) == 0,
+                $"Master 自动演示无 MISS（MISS {gm.Score.Count(Judgement.Miss)} 个）");
+
+            float nps = 0f;
+            if (gm.spawner.Chart != null && gm.spawner.Chart.NoteCount > 0)
+            {
+                double span = gm.spawner.Chart.LastNoteTime - gm.spawner.Chart.FirstNoteTime;
+                if (span > 1.0) nps = (float)(gm.spawner.Chart.NoteCount / span);
+            }
+            Check(nps >= 5.0f, $"Master 平均密度 {nps:0.00} 音符/秒（应 ≥5）");
+
+            gm.autoPlay = false;
+            gm.EnterMenu();
+            yield return null;
+        }
 
         /// <summary>
         /// Hold 长按交互：用真实谱面（WorldsEnd Expert 第 2 秒就有一根 Hold）跑一小段，
