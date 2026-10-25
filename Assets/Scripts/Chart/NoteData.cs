@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -7,13 +7,16 @@ namespace My4KGame
     /// <summary>
     /// 单个音符的数据（手册 4.1 的扩展版）。
     ///
-    /// 关键概念 —— <see cref="JudgeTimeMs"/>：音符**应被击中的音乐时间戳**（毫秒）。
-    /// 它在谱面加载时由 BPM / 拍号 / offset 一次性算出来，之后**永不改变**：
-    ///   · 调流速不改它；
-    ///   · 暂停/恢复不改它；
-    ///   · 视觉位置怎么算都不回写它。
-    /// 判定只用「当前歌曲时钟 − JudgeTimeMs」这个差值，所以流速再快再慢，
+    /// 关键概念 —— <see cref="JudgeTimeMs"/>：音符*应该被击中的音乐时间戳*（毫秒）。
+    /// 它在谱面加载时由 BPM / 拍号 / offset 一次性算出来，之后*永不改变*：
+    ///    · 调流速不改它；
+    ///    · 暂停/恢复不改它；
+    ///    · 视觉位置怎么算都不回写它。
+    /// 判定只用「当前歌曲时间 − JudgeTimeMs」这个差值，所以流速再快再慢，
     /// 同一个音符的命中判定永远落在同一毫秒上。
+    ///
+    /// Hold（长按）：duration / durationBeat 大于 0 时，这个音符从 JudgeTimeMs 开始
+    /// 一直持续到 EndJudgeTimeMs；玩家需要在头按下、按住到尾。
     /// </summary>
     [Serializable]
     public class NoteData
@@ -27,9 +30,17 @@ namespace My4KGame
         [Tooltip("可选：用拍号定位（第 0 拍 = 歌曲第 0 秒）。填了 -1 以外的值就以 beat 为准，time 会被算出来")]
         public float beat = -1f;
 
+        [Tooltip("长按持续秒数。0 = 普通音符；>0 = Hold")]
+        public float duration = 0f;
+
+        [Tooltip("可选：长按持续拍数。填了且 beat 有效时，优先按拍数算持续时长")]
+        public float durationBeat = -1f;
+
         // ---------------------------------------------------------------- 判定时间戳（只读）
         // 不加 [SerializeField]：它只存在于运行时，由 ChartLibrary 烘一次，永远不再变。
         private double _judgeTimeMs = double.NaN;
+        private double _endJudgeTimeMs = double.NaN;
+        private bool _isHold;
 
         /// <summary>
         /// 判定时间戳（毫秒）。谱面加载时算好，之后不可变。
@@ -43,6 +54,15 @@ namespace My4KGame
         /// <summary>是否已经"烘"过判定时间戳。</summary>
         public bool HasJudgeTime => !double.IsNaN(_judgeTimeMs);
 
+        /// <summary>长按结束时间戳（毫秒）。普通音符等于 JudgeTimeMs。</summary>
+        public double EndJudgeTimeMs => double.IsNaN(_endJudgeTimeMs) ? JudgeTimeMs : _endJudgeTimeMs;
+
+        /// <summary>是不是长按（Hold）。</summary>
+        public bool IsHold => _isHold;
+
+        /// <summary>长按持续毫秒数（普通音符为 0）。</summary>
+        public double HoldDurationMs => IsHold ? EndJudgeTimeMs - JudgeTimeMs : 0.0;
+
         /// <summary>
         /// 由谱面加载流程调用一次，写入判定时间戳。
         /// 全工程只有 ChartLibrary 调它 —— 其它任何地方调都是 bug（会让判定时间漂移）。
@@ -51,6 +71,13 @@ namespace My4KGame
         {
             _judgeTimeMs = judgeTimeMs;
             time = (float)(judgeTimeMs / 1000.0);
+        }
+
+        /// <summary>由谱面加载流程调用一次，写入长按结束时间戳和是否 Hold。</summary>
+        public void BakeHold(double endJudgeTimeMs, bool isHold)
+        {
+            _endJudgeTimeMs = endJudgeTimeMs;
+            _isHold = isHold;
         }
 
         public NoteData() { }
@@ -62,7 +89,9 @@ namespace My4KGame
         }
 
         public override string ToString() =>
-            $"lane{lane} @ {JudgeTimeMs:F1}ms";
+            IsHold
+                ? $"lane{lane} hold @ {JudgeTimeMs:F1}ms ~ {EndJudgeTimeMs:F1}ms"
+                : $"lane{lane} @ {JudgeTimeMs:F1}ms";
     }
 
     /// <summary>变速谱面用：从某一拍开始换 BPM。</summary>
@@ -95,7 +124,7 @@ namespace My4KGame
         [Tooltip("难度名：Easy / Normal / Hard ...")]
         public string difficulty = "";
 
-        [Tooltip("难度等级数字（1~10）")]
+        [Tooltip("难度等级数字，1~10")]
         public int level = 1;
 
         [Tooltip("谱面整体偏移（秒）。正值 = 所有音符往后挪")]

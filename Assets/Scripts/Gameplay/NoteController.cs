@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 
 namespace My4KGame
 {
@@ -6,16 +6,17 @@ namespace My4KGame
     /// 单个音符（手册 4.3 的完整版）：负责自己的下落位置，以及"太晚了就判 Miss"。
     ///
     /// 和手册的写法有两处刻意的改动，都是为了修掉原型阶段的真实 bug：
-    ///
     /// 1) 判定不在这里做。
     ///    手册 4.3 里每个音符自己在 Update 里读 Input.GetKeyDown，
     ///    如果同一轨道同时有两个音符（连打），一次按键会被两个音符都吃掉，判定两次、加两次分。
-    ///    本工程改成 NoteSpawner 统一扫描：一次按键只吃掉"离按键最近的那一个"音符。
-    ///
+    ///    本工程改成 NoteSpawner 统一扫描：一次按键只吃掉"离按键最近的、还在判定窗口内的那一个"音符。
     /// 2) 动画和回收分离。
-    ///    命中后音符要先放大淡出再回收（不然会"啪"地消失，视觉上很硬）。
-    ///    所以 IsAlive 立刻变 false（不再参与判定），但 GameObject 还活着播动画，
+    ///    命中后音符要先放大淡出再回收（否则会"啪"地消失，视觉上很硬）。
+    ///    所以 IsAlive 立刻设 false（不再参与判定），但 GameObject 还活着播放动画，
     ///    播完由 NoteSpawner 收进对象池。
+    ///
+    /// Hold（长按）：IsHold 的音符在头被按住后 IsHeld 置 true，头保持在判定线，
+    /// 身体向下延伸一条尾巴表示需要按住的时间；判定在 NoteSpawner 里完成。
     /// </summary>
     [DisallowMultipleComponent]
     [AddComponentMenu("My4KGame/Note Controller")]
@@ -30,7 +31,7 @@ namespace My4KGame
         [Header("命中动画")]
         [Tooltip("命中后放大淡出的时长（秒）")]
         public float hitPopSeconds = 0.14f;
-        [Tooltip("失误后淡出的时长（秒）")]
+        [Tooltip("失败后淡出的时长（秒）")]
         public float missFadeSeconds = 0.22f;
 
         /// <summary>这个音符的谱面数据。</summary>
@@ -38,6 +39,9 @@ namespace My4KGame
 
         /// <summary>还在场上、还没被判定（false 表示已经打过或已经漏掉）。</summary>
         public bool IsAlive { get; private set; }
+
+        /// <summary>长按是否正在被按住。</summary>
+        public bool IsHeld { get; private set; }
 
         public int Lane => Data == null ? 0 : Data.lane;
 
@@ -56,6 +60,7 @@ namespace My4KGame
         private GameManager _game;
         private ScrollSpeedTrack _scroll;
         private Vector3 _bodyBaseScale = Vector3.one;
+        private SpriteRenderer _holdTail;
 
         private float _animTimer;
         private float _animDuration;
@@ -71,6 +76,7 @@ namespace My4KGame
             Data = data;
 
             IsAlive = true;
+            IsHeld = false;
             _animTimer = 0f;
             _animJudgement = Judgement.None;
             transform.localRotation = Quaternion.identity;
@@ -82,6 +88,7 @@ namespace My4KGame
             // 立刻摆到"还差 travel 秒"的位置，避免第一帧从 (0,0) 闪过来
             float songTime = _game != null ? (float)_game.SongTime : (float)data.JudgeTimeSeconds - PlayfieldLayout.TravelTime;
             UpdatePosition(songTime);
+            UpdateHoldTail(songTime);
         }
 
         /// <summary>缺子物体就直接用代码补一个，保证预制体即使被改坏也能跑。</summary>
@@ -116,8 +123,24 @@ namespace My4KGame
             }
             if (glow.sprite == null) glow.sprite = SpriteFactory.Glow;
 
+            if (_holdTail == null)
+            {
+                Transform existing = transform.Find("HoldTail");
+                if (existing != null) _holdTail = existing.GetComponent<SpriteRenderer>();
+                if (_holdTail == null)
+                {
+                    var go = new GameObject("HoldTail");
+                    go.transform.SetParent(transform, false);
+                    _holdTail = go.AddComponent<SpriteRenderer>();
+                }
+                if (_holdTail.sprite == null) _holdTail.sprite = SpriteFactory.White;
+            }
+            if (_holdTail.sprite == null) _holdTail.sprite = SpriteFactory.White;
+
             glow.sortingOrder = -2;
             body.sortingOrder = 0;
+            _holdTail.sortingOrder = -1;
+
             _bodyBaseScale = body.transform.localScale;
             if (_bodyBaseScale.sqrMagnitude < 0.0001f) _bodyBaseScale = Vector3.one;
         }
@@ -138,6 +161,12 @@ namespace My4KGame
                 g.a = GlowBaseAlpha;
                 glow.color = g;
             }
+            if (_holdTail != null)
+            {
+                Color t = lane;
+                t.a = 0.35f;
+                _holdTail.color = t;
+            }
         }
 
         private void ResetVisualState()
@@ -156,6 +185,17 @@ namespace My4KGame
                 g.a = GlowBaseAlpha;
                 glow.color = g;
             }
+            if (_holdTail != null)
+            {
+                _holdTail.gameObject.SetActive(false);
+            }
+        }
+
+        /// <summary>长按头被按住了。</summary>
+        public void BeginHold()
+        {
+            if (!IsAlive) return;
+            IsHeld = true;
         }
 
         // ================================================================ 每帧
@@ -182,10 +222,19 @@ namespace My4KGame
             }
 
             UpdatePosition(songTime);
+            UpdateHoldTail(songTime);
 
-            // 手册 4.3 第 2 步：过了判定线还没被打中 = MISS
-            // 注意用毫秒比较「当前时钟 − 判定时间戳」，和视觉位置、流速毫无关系
-            if (songTime * 1000.0 - Data.JudgeTimeMs > game.MissWindowMs)
+            // 手册 4.3 第 2 步：过了判定线还没被打中 = MISS。
+            // Hold 一旦按住就不再按头判定时间做 MISS，结束交给 NoteSpawner 的 TickHolds。
+            bool pastWindow = songTime * 1000.0 - Data.JudgeTimeMs > game.MissWindowMs;
+            if (Data.IsHold)
+            {
+                if (!IsHeld && pastWindow)
+                {
+                    _owner?.MissNote(this);
+                }
+            }
+            else if (pastWindow)
             {
                 _owner?.MissNote(this);
             }
@@ -218,12 +267,52 @@ namespace My4KGame
             transform.position = new Vector3(PlayfieldLayout.LaneToX(Data.lane), y, 0f);
         }
 
+        /// <summary>
+        /// 长按的"身体尾巴"：头在下方（先到判定线），尾巴向上延伸到结束时间。
+        /// 长度用"结束时间戳 − 当前时间"实时换算，所以下落时长度恒定，按住后逐渐缩短。
+        /// </summary>
+        private void UpdateHoldTail(float songTime)
+        {
+            if (_holdTail == null) return;
+
+            if (Data == null || !Data.IsHold)
+            {
+                if (_holdTail.gameObject.activeSelf) _holdTail.gameObject.SetActive(false);
+                return;
+            }
+
+            _holdTail.gameObject.SetActive(true);
+
+            ScrollSpeedTrack scroll = _scroll != null ? _scroll : (_game != null ? _game.Scroll : null);
+
+            float headY = transform.position.y;
+            float tailSecondsAhead = ScrollSpeedTrack.SecondsAheadOf(Data.EndJudgeTimeMs, songTime);
+            float tailY;
+            if (scroll != null)
+            {
+                tailY = scroll.SecondsAheadToY(tailSecondsAhead);
+            }
+            else
+            {
+                float progress = 1f - tailSecondsAhead / PlayfieldLayout.TravelTime;
+                tailY = Mathf.Lerp(PlayfieldLayout.SpawnY, PlayfieldLayout.JudgeLineY, progress);
+            }
+
+            // 头在下，尾巴从头的中心向上延伸
+            float length = Mathf.Max(0f, tailY - headY);
+            _holdTail.transform.localPosition = new Vector3(0f, length * 0.5f, 0f);
+            // White 贴图是 4x4px、PPU 100 => 0.04 世界单位/单位缩放；宽 1.5，长 length
+            _holdTail.transform.localScale = new Vector3(1.5f / 0.04f, length / 0.04f, 1f);
+        }
+
         // ================================================================ 判定结果
         /// <summary>命中：立刻退出判定队列，然后播放放大淡出动画。</summary>
         public void PlayHit(Judgement judgement)
         {
             if (!IsAlive) return;
             IsAlive = false;
+            IsHeld = false;
+            if (_holdTail != null) _holdTail.gameObject.SetActive(false);
             _animJudgement = judgement;
             _animDuration = judgement == Judgement.Miss ? missFadeSeconds : hitPopSeconds;
             _animTimer = _animDuration;
@@ -242,7 +331,7 @@ namespace My4KGame
 
             if (_animJudgement == Judgement.Miss)
             {
-                // 失误：继续往下掉一点点，同时淡出
+                // 失败：继续往下掉一点点，同时淡出
                 Vector3 p = transform.position;
                 p.y -= Time.deltaTime * 1.2f;
                 transform.position = p;
@@ -285,12 +374,19 @@ namespace My4KGame
                 g.a = Mathf.Clamp01(alpha * GlowBaseAlpha);
                 glow.color = g;
             }
+            if (_holdTail != null)
+            {
+                Color t = _holdTail.color;
+                t.a = Mathf.Clamp01(alpha * 0.35f);
+                _holdTail.color = t;
+            }
         }
 
         /// <summary>给对象池复用前调用。</summary>
         public void RecycleNow()
         {
             IsAlive = false;
+            IsHeld = false;
             _animTimer = 0f;
             ResetVisualState();
         }

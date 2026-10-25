@@ -207,6 +207,7 @@ namespace My4KGame
 
                 case GameState.Playing:
                     HandleLaneInput();
+                    HandleLaneRelease();
                     if (SongTime >= _songEndTime) FinishSong();
                     break;
             }
@@ -423,6 +424,15 @@ namespace My4KGame
             }
         }
 
+        private void HandleLaneRelease()
+        {
+            if (keys == null || keys.Length < PlayfieldLayout.LaneCount) return;
+            for (int lane = 0; lane < PlayfieldLayout.LaneCount; lane++)
+            {
+                if (Input.GetKeyUp(keys[lane])) ReleaseLane(lane);
+            }
+        }
+
         /// <summary>手动触发一次轨道按键（也方便外部脚本调用 / 自动演示）。</summary>
         public Judgement PressLane(int lane)
         {
@@ -430,6 +440,13 @@ namespace My4KGame
             Judgement result = spawner.ResolvePress(lane, JudgeTime);
             LanePressed?.Invoke(lane, result);
             return result;
+        }
+
+        /// <summary>手动触发一次轨道松开（长按 Hold 用）。</summary>
+        public Judgement ReleaseLane(int lane)
+        {
+            if (State != GameState.Playing || spawner == null) return Judgement.None;
+            return spawner.ResolveRelease(lane, JudgeTime);
         }
 
         /// <summary>

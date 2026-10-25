@@ -270,7 +270,7 @@ namespace My4KGame
             // ============================================================
             double offsetMs = chart.offset * 1000.0;
 
-            int badLane = 0, negativeTime = 0, duplicates = 0;
+            int badLane = 0, negativeTime = 0, duplicates = 0, shortHolds = 0;
             var seen = new HashSet<long>();
             var cleaned = new List<NoteData>(chart.notes.Count);
 
@@ -292,6 +292,38 @@ namespace My4KGame
                 if (!seen.Add(key)) { duplicates++; continue; }
 
                 note.BakeJudgeTimeMs(judgeTimeMs);   // time 字段同步更新为等价秒数
+
+                // ------------------------------------------------------------
+                // Hold：duration（秒）或 durationBeat（拍，需 beat 有效）大于 0 即长按。
+                // 时长在这里一次性算好并烘进 EndJudgeTimeMs，之后判定不再算。
+                // ------------------------------------------------------------
+                double holdDurationMs = 0.0;
+                if (note.durationBeat > 0f && note.beat >= 0f)
+                {
+                    double startMs = chart.BeatToMs(note.beat);
+                    double endMs = chart.BeatToMs(note.beat + note.durationBeat);
+                    holdDurationMs = Math.Max(0.0, endMs - startMs);
+                }
+                else if (note.duration > 0f)
+                {
+                    holdDurationMs = note.duration * 1000.0;
+                }
+
+                bool isHold = false;
+                if (holdDurationMs > 0.0)
+                {
+                    if (holdDurationMs < 40.0)
+                    {
+                        shortHolds++;
+                        holdDurationMs = 0.0;   // 太短的长按按普通音符处理
+                    }
+                    else
+                    {
+                        isHold = true;
+                    }
+                }
+
+                note.BakeHold(judgeTimeMs + holdDurationMs, isHold);
                 cleaned.Add(note);
             }
 
@@ -312,6 +344,10 @@ namespace My4KGame
             if (duplicates > 0)
             {
                 error = (error ?? "") + $" 已去掉 {duplicates} 个重复音符。";
+            }
+            if (shortHolds > 0)
+            {
+                error = (error ?? "") + $" 已把 {shortHolds} 个过短的长按（<40ms）当作普通音符。";
             }
 
             return chart;
