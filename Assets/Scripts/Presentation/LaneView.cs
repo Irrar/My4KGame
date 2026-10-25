@@ -26,6 +26,10 @@ namespace My4KGame
         private float _flash;
         private Color _flashColor = Color.white;
         private Color _laneColor = Color.white;
+        private bool _held;
+
+        /// <summary>该轨道当前是否正在被长按（Hold）。</summary>
+        public bool IsHeld => _held;
 
         /// <summary>设置轨道编号、位置和颜色。WorldBuilder 建完物体后调用。</summary>
         public void Configure(int laneIndex)
@@ -84,8 +88,35 @@ namespace My4KGame
             ApplyColors();
         }
 
+        /// <summary>
+        /// 长按状态：按住期间判定区保持高亮并缓慢呼吸，松手立刻恢复。
+        /// 这是玩家能"看见自己在按着"的主要视觉依据之一（另一个是判定线上的持续光晕）。
+        /// </summary>
+        public void SetHeld(bool held)
+        {
+            _held = held;
+            if (held)
+            {
+                _flash = Mathf.Max(_flash, 0.65f);
+                _flashColor = JudgementInfo.ToColor(Judgement.Perfect);
+            }
+            else
+            {
+                _flash = 0f;
+            }
+            ApplyColors();
+        }
+
         private void Update()
         {
+            if (_held)
+            {
+                // 按住：稳定在 0.45~0.63 之间呼吸，不再随时间衰减
+                _flash = 0.54f + 0.09f * Mathf.Sin(Time.unscaledTime * 7f);
+                ApplyColors();
+                return;
+            }
+
             if (_flash <= 0f) return;
             _flash = Mathf.Max(0f, _flash - Time.deltaTime * flashDecay);
             ApplyColors();

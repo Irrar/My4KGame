@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using UnityEngine;
 
 namespace My4KGame
@@ -92,6 +92,18 @@ namespace My4KGame
         public event Action<double> CalibrationChanged;
         /// <summary>流速变化（视觉参数；UI 用）。</summary>
         public event Action<float> ScrollSpeedChanged;
+        /// <summary>某轨道开始长按（Hold 头被打中的那一刻）。表现层据此点亮"正在按住"的持续反馈。</summary>
+        public event Action<int> HoldStarted;
+        /// <summary>某轨道结束长按（松手 / 到尾 / 中断）。</summary>
+        public event Action<int> HoldEnded;
+
+        // ================================================================ 长按反馈通知
+        // 只做转发：判定状态仍然全部由 NoteSpawner 负责，这里不参与任何判定计算。
+        /// <summary>由 NoteSpawner 调用：lane 轨道的 Hold 开始被按住。</summary>
+        public void NotifyHoldStarted(int lane) { HoldStarted?.Invoke(lane); }
+
+        /// <summary>由 NoteSpawner 调用：lane 轨道的 Hold 结束（松手/到尾/中断）。</summary>
+        public void NotifyHoldEnded(int lane) { HoldEnded?.Invoke(lane); }
 
         // ================================================================ 运行时状态
         private const string CalibrationKey = "My4KGame.Calibration";

@@ -127,6 +127,12 @@ namespace My4KGame.EditorTools
             }
             Check(true, "GameManager 已就绪，Unity " + Application.unityVersion);
 
+            // 每次跑测试先复位"会存进 PlayerPrefs 的东西"，否则上一次（甚至玩家本人）
+            // 留下的校准值会让所有按键整体偏移 → 全空打，测试结果不可复现。
+            gm.SetCalibration(0.0);
+            gm.SetScrollValue(ScrollSpeedTrack.CenterValue, save: false);
+            _lines.Add("[信息] 已复位音画校准 = 0ms、流速 = 5.50（保证每次跑都是同样的起点）");
+
             Check(gm.State == GameState.Menu, $"启动后应停在选曲界面（实际 {gm.State}）");
             Check(Nz(Object.FindObjectOfType<HudView>()), "HudView 存在");
             Check(Nz(Object.FindObjectOfType<MenuView>()), "MenuView 存在");
@@ -239,10 +245,96 @@ namespace My4KGame.EditorTools
             // ---------------------------------------------------------- 9. 主界面按钮点击链路探针
             yield return StartCoroutine(MenuButtonChecks(gm));
 
+            // ---------------------------------------------------------- 10. Hold 长按交互
+            yield return StartCoroutine(HoldInteractionChecks(gm));
+
             Finish();
         }
 
         private static bool Nz(UnityEngine.Object o) => o != null;
+
+        /// <summary>
+        /// Hold 长按交互：用真实谱面（WorldsEnd Expert 第 2 秒就有一根 Hold）跑一小段，
+        /// 验证「开始事件 → 轨道常亮 → 结束事件」这条链有没有断。
+        ///
+        /// 之所以专门测它：之前 Hold 只有"头停住"这一个视觉线索，玩家分不清是按住还是卡住，
+        /// 而这套反馈完全依赖 HoldStarted / HoldEnded 两个事件，事件一断就退化成"没反馈"。
+        /// </summary>
+        private IEnumerator HoldInteractionChecks(GameManager gm)
+        {
+            _lines.Add("[信息] ---- Hold 长按交互 ----");
+
+            if (gm == null || gm.spawner == null)
+            {
+                Check(false, "GameManager / NoteSpawner 为空，无法验证 Hold");
+                yield break;
+            }
+
+            int started = 0, ended = 0;
+            Action<int> onStart = lane => started++;
+            Action<int> onEnd = lane => ended++;
+            gm.HoldStarted += onStart;
+            gm.HoldEnded += onEnd;
+
+            PlayfieldView view = Object.FindObjectOfType<PlayfieldView>();
+            bool laneLit = false;
+            bool sampled = false;
+
+            gm.autoPlay = true;
+            if (!gm.StartSong("WorldsEndBLACKBOX_Expert"))
+            {
+                Check(false, "StartSong(WorldsEndBLACKBOX_Expert) 失败");
+                gm.HoldStarted -= onStart;
+                gm.HoldEnded -= onEnd;
+                yield break;
+            }
+
+            float deadline = Time.realtimeSinceStartup + 25f;
+            while (started == 0 && Time.realtimeSinceStartup < deadline) yield return null;
+            Check(started > 0, $"Hold 开始事件触发了（{started} 次）");
+
+            // 按住期间采样一次：轨道应处于 held 状态（常亮 + 呼吸）
+            for (int i = 0; i < 240 && !sampled; i++)
+            {
+                if (gm.spawner != null)
+                {
+                    foreach (NoteController n in gm.spawner.ActiveNotes)
+                    {
+                        if (n == null || !n.IsHeld) continue;
+                        sampled = true;
+                        if (view != null && view.lanes != null &&
+                            n.Lane < view.lanes.Length && view.lanes[n.Lane] != null)
+                        {
+                            laneLit = view.lanes[n.Lane].IsHeld;
+                        }
+                        break;
+                    }
+                }
+                if (!sampled) yield return null;
+            }
+
+            if (sampled)
+            {
+                Check(laneLit, "按住期间对应轨道被点亮（LaneView.IsHeld = true）");
+            }
+            else
+            {
+                _lines.Add("[信息] 未采样到「按住中」的瞬间（Hold 很短），跳过轨道常亮断言");
+            }
+
+            deadline = Time.realtimeSinceStartup + 25f;
+            while (ended == 0 && Time.realtimeSinceStartup < deadline) yield return null;
+            Check(ended > 0, $"Hold 结束事件触发了（{ended} 次）");
+            Check(started >= ended, $"开始/结束事件数量合理（开始 {started} / 结束 {ended}）");
+
+            gm.autoPlay = false;
+            gm.EnterMenu();
+            yield return null;
+            Check(ended == started, $"清场后事件配对平衡（开始 {started} / 结束 {ended}）");
+
+            gm.HoldStarted -= onStart;
+            gm.HoldEnded -= onEnd;
+        }
 
         /// <summary>
         /// 主界面按钮探针：把「点击」这条链拆成 4 段分别验证

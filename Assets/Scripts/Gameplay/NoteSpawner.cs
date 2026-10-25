@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -162,6 +162,7 @@ namespace My4KGame
                         _heldJudgement[note.Lane] = game.Judge(0f);
                         _heldDeltaMs[note.Lane] = 0.0;
                         note.BeginHold();
+                        game.NotifyHoldStarted(note.Lane);
                     }
                     continue;   // 结束交给 TickHolds
                 }
@@ -225,6 +226,7 @@ namespace My4KGame
                 _heldJudgement[lane] = judgement;
                 _heldDeltaMs[lane] = bestDeltaMs;
                 best.BeginHold();
+                game.NotifyHoldStarted(lane);      // 表现层开始持续反馈
                 return judgement;
             }
 
@@ -241,11 +243,9 @@ namespace My4KGame
             NoteController held = _held[lane];
             if (held == null) return Judgement.None;
 
-            _held[lane] = null;
             Judgement head = _heldJudgement[lane];
             double headDeltaMs = _heldDeltaMs[lane];
-            _heldJudgement[lane] = Judgement.None;
-            _heldDeltaMs[lane] = 0.0;
+            ClearHoldSlot(lane);          // 内部会通知表现层"按住结束"，先熄掉持续光效
 
             if (!held.IsAlive) return Judgement.None;
 
@@ -295,9 +295,11 @@ namespace My4KGame
 
         private void ClearHoldSlot(int lane)
         {
+            bool hadHold = _held[lane] != null;
             _held[lane] = null;
             _heldJudgement[lane] = Judgement.None;
             _heldDeltaMs[lane] = 0.0;
+            if (hadHold) GameManager.Instance?.NotifyHoldEnded(lane);
         }
 
         private void ClearAllHolds()

@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -15,6 +15,12 @@ namespace My4KGame
     public sealed class MenuView : MonoBehaviour
     {
         private const string DefaultSubtitle = "4K 下落式音游 · 用 D F J K 打击四条轨道 · 音符落到判定线时按下";
+
+        /// <summary>
+        /// 右侧"设置栏"的宽度（流速卡片 / 音画校准 / 自动演示都在这条栏里）。
+        /// 选曲面板必须让出这段宽度，否则会把它整块盖住：看不见、也点不到。
+        /// </summary>
+        public const float SettingsColumnWidth = 640f;
 
         [Header("根节点")]
         public RectTransform root;
@@ -192,6 +198,10 @@ namespace My4KGame
             if (existing != null)
             {
                 songPanel = (RectTransform)existing;
+                // 场景里存下来的旧面板可能还是全屏的：每次进菜单都纠正一次，
+                // 保证右侧设置栏不被挡住（点击失效的根因）。
+                UiFactory.Stretch(songPanel);
+                songPanel.offsetMax = new Vector2(-SettingsColumnWidth, 0f);
                 if (prevSongButton == null) prevSongButton = FindButtonIn(songPanel, "Button_◀");
                 if (nextSongButton == null) nextSongButton = FindButtonIn(songPanel, "Button_▶");
                 if (enterSongButton == null) enterSongButton = FindButtonIn(songPanel, "Button_进入");
@@ -217,6 +227,9 @@ namespace My4KGame
             Image backdrop = UiFactory.CreateImage(root, "SongPanel", new Color(0.02f, 0.03f, 0.05f, 0.985f));
             songPanel = backdrop.rectTransform;
             UiFactory.Stretch(songPanel);
+            // 只占左侧：右边 640px 留给"设置栏"（流速卡片 / 音画校准 / 自动演示）。
+            // 否则全屏面板会把它们整个盖住 —— 既看不见，射线也点不到（RaycastTarget=true 会挡住点击）。
+            songPanel.offsetMax = new Vector2(-SettingsColumnWidth, 0f);
             backdrop.raycastTarget = true;   // 挡住背后的难度选择界面
 
             Text panelTitle = UiFactory.CreateOutlinedText(songPanel, "SongPanelTitle", "选择歌曲", 60,

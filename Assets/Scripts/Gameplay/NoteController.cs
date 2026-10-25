@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 
 namespace My4KGame
 {
@@ -65,6 +65,9 @@ namespace My4KGame
         private float _animTimer;
         private float _animDuration;
         private Judgement _animJudgement;
+
+        /// <summary>本音符的轨道基准色（按住时的提亮以它为基底）。</summary>
+        private Color _bodyColor = Color.white;
 
         // ================================================================ 初始化
         /// <summary>由 NoteSpawner 在生成/复用时调用。</summary>
@@ -150,6 +153,7 @@ namespace My4KGame
         {
             if (Data == null) return;
             Color lane = PlayfieldLayout.LaneColor(Data.lane);
+            _bodyColor = lane;
 
             if (body != null)
             {
@@ -196,6 +200,43 @@ namespace My4KGame
         {
             if (!IsAlive) return;
             IsHeld = true;
+            ApplyHoldVisual();
+        }
+
+        /// <summary>
+        /// 按住期间的持续视觉：本体提亮 + 呼吸缩放，柔光加强，尾条变亮。
+        ///
+        /// 为什么需要它：只把音符"停"在判定线上，玩家分辨不出是"按住了"还是"卡住了"。
+        /// 所以按住期间每帧给一点脉动 —— 松手后 PlayHit/PlayMiss 会立刻接管，不会残留。
+        /// </summary>
+        private void ApplyHoldVisual()
+        {
+            float pulse = 0.5f + 0.5f * Mathf.Sin(Time.unscaledTime * 9f);
+
+            if (body != null)
+            {
+                Color c = Color.Lerp(_bodyColor, Color.white, 0.30f + 0.30f * pulse);
+                c.a = 1f;
+                body.color = c;
+                body.transform.localScale = _bodyBaseScale * (1f + 0.07f * pulse);
+            }
+
+            if (glow != null)
+            {
+                Color g = Color.Lerp(_bodyColor, Color.white, 0.55f);
+                g.a = GlowBaseAlpha * (1.7f + 1.0f * pulse);
+                glow.color = g;
+                glow.transform.localScale = new Vector3(
+                    GlowBaseScale.x * (1.10f + 0.18f * pulse),
+                    GlowBaseScale.y * (1.10f + 0.18f * pulse), 1f);
+            }
+
+            if (_holdTail != null)
+            {
+                Color t = Color.Lerp(_bodyColor, Color.white, 0.25f);
+                t.a = 0.50f + 0.25f * pulse;
+                _holdTail.color = t;
+            }
         }
 
         // ================================================================ 每帧
@@ -223,6 +264,9 @@ namespace My4KGame
 
             UpdatePosition(songTime);
             UpdateHoldTail(songTime);
+
+            // 按住期间持续给反馈（松手/到尾后 PlayHit / PlayMiss 会接管视觉）
+            if (IsHeld) ApplyHoldVisual();
 
             // 手册 4.3 第 2 步：过了判定线还没被打中 = MISS。
             // Hold 一旦按住就不再按头判定时间做 MISS，结束交给 NoteSpawner 的 TickHolds。
