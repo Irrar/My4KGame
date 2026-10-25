@@ -35,7 +35,6 @@ namespace My4KGame
         public Text calibrationLabel;
         public Text calibrationValue;
         public Text speedValue;
-        public Text speedHint;
         public SpeedPreviewView preview;
         public Button autoPlayButton;
         public Text autoPlayLabel;
@@ -130,8 +129,16 @@ namespace My4KGame
             {
                 calibrationLabel = UiFactory.CreateText(root, "CalibrationLabel",
                     "音画校准", 28, Theme.TextPrimary, TextAnchor.UpperLeft);
+                // 宽度只占右侧设置栏（640px）以内，否则左半边会被选曲面板压住、显示成灰字
                 UiFactory.Place(calibrationLabel.rectTransform, new Vector2(1f, 0.5f), new Vector2(-120f, 214f),
-                    new Vector2(700f, 40f), new Vector2(1f, 0.5f));
+                    new Vector2(440f, 40f), new Vector2(1f, 0.5f));
+            }
+            else
+            {
+                // 老场景里这个 Text 还是 700 宽，左半边会被选曲面板压住（看起来像灰字）。
+                // 每次进菜单都纠正一次，这样不必重建场景也能生效。
+                UiFactory.Place(calibrationLabel.rectTransform, new Vector2(1f, 0.5f), new Vector2(-120f, 214f),
+                    new Vector2(440f, 40f), new Vector2(1f, 0.5f));
             }
             if (calibrationValue == null)
             {
@@ -142,15 +149,9 @@ namespace My4KGame
                 calibrationValue = row.value;
             }
 
-            Text calibrationHint = findChildText("CalibrationHint");
-            if (calibrationHint == null)
-            {
-                calibrationHint = UiFactory.CreateText(root, "CalibrationHint",
-                    "每次 5ms，范围 ±150ms（判定偏早就调大）", 21,
-                    Theme.TextMuted, TextAnchor.UpperLeft);
-                UiFactory.Place(calibrationHint.rectTransform, new Vector2(1f, 0.5f), new Vector2(-120f, 120f),
-                    new Vector2(700f, 28f), new Vector2(1f, 0.5f));
-            }
+            // 校准的说明文字已按要求移除；这里把旧场景里遗留的 Text 清掉，
+            // 否则场景里的旧文案还会继续显示（代码不再创建它了）。
+            DestroyChild("CalibrationHint");
 
             // 校准的 − / + 回调每次重新绑定（Action 不序列化，场景里存下来的会失效）
             BindCalibrationButtons();
@@ -588,8 +589,11 @@ namespace My4KGame
             if (existing != null)
             {
                 if (speedValue == null) speedValue = findChildText("SpeedCardValue");
-                if (speedHint == null) speedHint = findChildText("SpeedCardHint");
                 if (preview == null) preview = existing.GetComponentInChildren<SpeedPreviewView>(true);
+
+                // 卡片底部的说明文字已按要求移除：清掉旧场景里遗留的那个 Text
+                Transform oldHint = root.Find("SpeedCard/SpeedCardHint");
+                if (oldHint != null) DestroyObject(oldHint.gameObject);
 
                 // 关键：场景里存下来的按钮，回调（Action）不会被序列化，必须每次重绑
                 BindSpeedCardArrows();
@@ -629,12 +633,6 @@ namespace My4KGame
                 () => NudgeSpeed(-ScrollSpeedTrack.Step));
             CreateArrow(card.rectTransform, "▶", new Vector2(176f, 2f),
                 () => NudgeSpeed(ScrollSpeedTrack.Step));
-
-            // ---- 提示
-            speedHint = UiFactory.CreateText(card.rectTransform, "SpeedCardHint",
-                "每次调整0.25，只改视觉，不影响判定", 19, Theme.TextMuted, TextAnchor.MiddleCenter);
-            UiFactory.Place(speedHint.rectTransform, new Vector2(0.5f, 0f), new Vector2(0f, 14f),
-                new Vector2(450f, 24f), new Vector2(0.5f, 0f));
 
             // ---- 实时预览（放在卡片下方）
             RectTransform previewRect = UiFactory.CreateRect(root, "SpeedPreview");
