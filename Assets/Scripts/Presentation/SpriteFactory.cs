@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 
 namespace My4KGame
@@ -32,6 +32,7 @@ namespace My4KGame
         public const float PixelsPerUnit = 100f;
 
         private static readonly Dictionary<SpriteKind, Sprite> Cache = new Dictionary<SpriteKind, Sprite>();
+        private static readonly Dictionary<string, Sprite> CoverCache = new Dictionary<string, Sprite>();
 
         public static Sprite White => Get(SpriteKind.White);
         public static Sprite Note => Get(SpriteKind.Note);
@@ -55,7 +56,11 @@ namespace My4KGame
         }
 
         /// <summary>清缓存（编辑器里重新导入图片后调用）。</summary>
-        public static void ClearCache() => Cache.Clear();
+        public static void ClearCache()
+        {
+            Cache.Clear();
+            CoverCache.Clear();
+        }
 
         /// <summary>把贴图包装成 Sprite。</summary>
         public static Sprite Build(SpriteKind kind)
@@ -68,7 +73,7 @@ namespace My4KGame
             return sprite;
         }
 
-        /// <summary>生成贴图本体（编辑器写 png 时也用它，保证两边像素完全一致）。</summary>
+        /// <summary>生成贴图本体（编辑器导 png 时也用它，保证两边像素完全一致）。</summary>
         public static Texture2D Generate(SpriteKind kind)
         {
             switch (kind)
@@ -79,6 +84,76 @@ namespace My4KGame
                 case SpriteKind.LanePanel: return GenerateLanePanel(240, 1200);
                 case SpriteKind.JudgeLine: return GenerateJudgeLine(1040, 48);
                 default: return GenerateWhite(4, 4);
+            }
+        }
+
+        // ================================================================ 歌曲封面
+        /// <summary>
+        /// 生成一张歌曲封面占位图：根据曲名稳定地取两种颜色，画成渐变方块。
+        /// 只要曲名不变，颜色就每次都一样；用户想换正式曲绘，把同曲名的 png 丢进
+        /// Assets/Resources/Art/Covers/ 即可（ChartLibrary 会优先读它）。
+        /// </summary>
+        public static Sprite Cover(string songName)
+        {
+            string key = "Cover:" + (string.IsNullOrEmpty(songName) ? "Unknown" : songName);
+            if (CoverCache.TryGetValue(key, out Sprite cached) && cached != null) return cached;
+
+            Texture2D texture = GenerateCover(songName);
+            var sprite = Sprite.Create(texture, new Rect(0f, 0f, texture.width, texture.height),
+                new Vector2(0.5f, 0.5f), PixelsPerUnit);
+            sprite.name = "Generated_Cover";
+            sprite.hideFlags = HideFlags.DontSave;
+            CoverCache[key] = sprite;
+            return sprite;
+        }
+
+        private static Texture2D GenerateCover(string name)
+        {
+            const int size = 512;
+            var tex = NewTexture(size, size);
+            var px = new Color32[size * size];
+
+            int hash = StableHash(name);
+            float hue = (hash & 0xFFFF) / 65535f;
+            Color top = Color.HSVToRGB(hue, 0.62f, 0.52f);
+            Color bottom = Color.HSVToRGB((hue + 0.16f) % 1f, 0.72f, 0.22f);
+
+            float cx = size * 0.5f;
+            float cy = size * 0.42f;
+            float radius = size * 0.55f;
+
+            for (int y = 0; y < size; y++)
+            {
+                float t = y / (float)(size - 1);
+                Color baseColor = Color.Lerp(top, bottom, t);
+                for (int x = 0; x < size; x++)
+                {
+                    float dx = (x - cx) / radius;
+                    float dy = (y - cy) / radius;
+                    float d = Mathf.Sqrt(dx * dx + dy * dy);
+                    float highlight = Mathf.Clamp01(1f - d) * 0.16f;
+                    Color c = baseColor + new Color(highlight, highlight, highlight, 0f);
+                    px[y * size + x] = new Color32(
+                        (byte)Mathf.RoundToInt(Mathf.Clamp01(c.r) * 255f),
+                        (byte)Mathf.RoundToInt(Mathf.Clamp01(c.g) * 255f),
+                        (byte)Mathf.RoundToInt(Mathf.Clamp01(c.b) * 255f),
+                        255);
+                }
+            }
+
+            tex.SetPixels32(px);
+            tex.Apply(false, false);
+            return tex;
+        }
+
+        private static int StableHash(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return 0;
+            unchecked
+            {
+                int h = 17;
+                foreach (char c in s) h = h * 31 + c;
+                return h;
             }
         }
 
@@ -115,7 +190,6 @@ namespace My4KGame
                 float ty = y / (float)(h - 1);
                 float value = Mathf.Lerp(0.74f, 1.0f, ty);         // 底部略暗，有体积感
                 if (y >= h - 4) value = 1.0f;                      // 顶部一条亮边
-
                 for (int x = 0; x < w; x++)
                 {
                     float mask = RoundedMask(x, y, w, h, radius);

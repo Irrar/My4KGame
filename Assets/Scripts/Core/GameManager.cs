@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using UnityEngine;
 
 namespace My4KGame
@@ -16,18 +16,18 @@ namespace My4KGame
     /// <summary>
     /// 游戏管理器（手册 4.2 的完整版）：音频时钟、状态机、判定窗口、计分、输入分发。
     ///
-    /// ── 手册 4.2 的核心思路，一个字都没改 ───────────────────────────
+    /// —— 手册 4.2 的核心思路，一个字都没改 ——
     /// 用 AudioSettings.dspTime 当主时钟，不用 Time.time。
     /// dspTime 是声卡自己的采样时钟：单调、稳定、和渲染帧率无关。
-    /// 再用 PlayScheduled 提前安排起播，于是"从调到真出声"的延迟交给音频系统处理，
+    /// 再用 PlayScheduled 提前安排起播，于是"从调用到真正出声"的延迟交给音频系统处理，
     /// 我们拿到的就是一个精确已知的起播时刻 dspSongStart。
     ///
-    /// ── 本工程在此基础上补完的四件事 ────────────────────────────────
+    /// —— 本工程在此基础上补完的四件事 ——
     /// 1. 起播前的等待期：歌曲时间是负数，倒计时、前奏、谱面前 2 秒统一用一条时间轴。
     /// 2. 判定用原始 dsp 时间（准），画面用平滑后的 SongTime（稳），两者解耦。
     /// 3. 音画校准：抵消音频输出缓冲区那 10~50ms 的延迟。
     /// 4. 暂停：暂停时 dspTime 还在走，所以恢复时要把起播时刻整体后移相同的时长，
-    ///    否则歌曲时间会跳一下 —— 这是暂停功能最常见的坑。
+    ///    否则歌曲时间会跳一下——这是暂停功能最常见的坑。
     /// </summary>
     [DefaultExecutionOrder(-100)]
     [DisallowMultipleComponent]
@@ -54,7 +54,7 @@ namespace My4KGame
         public float perfectWindow = 0.040f;
         [Tooltip("GREAT ±80ms")]
         public float greatWindow = 0.080f;
-        [Tooltip("GOOD ±120ms，超出这个范围按下 = 空打")]
+        [Tooltip("GOOD ±120ms，超出这个范围按键 = 空打")]
         public float goodWindow = 0.120f;
         [Tooltip("音符过了判定线这么久还没被打中 = MISS")]
         public float missWindow = 0.140f;
@@ -111,7 +111,7 @@ namespace My4KGame
         public bool AutoPlay => autoPlay;
 
         /// <summary>
-        /// 当前歌曲时间（秒）—— 手册 4.2 的 <c>CurrentAudioTime</c>。
+        /// 当前歌曲时间（秒）——手册 4.2 的 <c>CurrentAudioTime</c>。
         /// 负数表示还在倒计时。这是"判定用"的时间，最准。
         /// </summary>
         public double CurrentAudioTime => _songRunning ? AudioSettings.dspTime - _dspSongStart : -leadInSeconds;
@@ -123,8 +123,8 @@ namespace My4KGame
         public double JudgeTime => CurrentAudioTime - calibrationOffset;
 
         // ---------------------------------------------------------------- 判定窗口（毫秒）
-        // 判定一律用毫秒比较：整数级别的时间量，浮点误差小，也好和文档/验收表对齐。
-        // 这四个值来自 Inspector 里的秒数，**不包含任何流速因子** —— 这是硬约束。
+        // 判定一律用毫秒比较：整数级的时间量，浮点误差小，也好和文档验收表对齐。
+        // 这四个值来自 Inspector 里的秒数，*不包含任何流速因子* —— 这是硬约束。
         public double PerfectWindowMs => perfectWindow * 1000.0;
         public double GreatWindowMs => greatWindow * 1000.0;
         public double GoodWindowMs => goodWindow * 1000.0;
@@ -157,7 +157,7 @@ namespace My4KGame
             }
         }
 
-        /// <summary>倒计时还剩几秒（负数区间时为正数，倒计时结束后为 0）。</summary>
+        /// <summary>倒计时还剩几秒（负区间时为正数，倒计时结束后为 0）。</summary>
         public double CountdownRemaining => Math.Max(0.0, -CurrentAudioTime);
 
         // ================================================================ 生命周期
@@ -174,7 +174,7 @@ namespace My4KGame
 
             Scroll = new ScrollSpeedTrack(PlayfieldLayout.TravelTime);
 
-            // 流速的全局数据源：读回上次设置，之后主界面 / 游戏内都只改它
+            // 流速的全局数据源：读回上次设置，之后主界面 / 游戏内都只改它。
             ScrollSpeedState.Load();
             ScrollSpeedState.Changed += OnScrollSpeedStateChanged;
             ApplyScrollSpeed();
@@ -212,6 +212,7 @@ namespace My4KGame
             }
 
             HandleSpeedKeys();
+            HandlePausedInput();
             HandleGlobalKeys();
         }
 
@@ -225,7 +226,7 @@ namespace My4KGame
             musicSource.loop = false;
             musicSource.spatialBlend = 0f;   // 2D 音频，不加空间衰减
             musicSource.volume = 1f;
-            musicSource.priority = 0;        // 最高优先级，避免被其他音效抢占
+            musicSource.priority = 0;        // 最高优先级，避免被其它音效抢占
         }
 
         /// <summary>
@@ -286,7 +287,7 @@ namespace My4KGame
             _songRunning = true;
             _songEndTime = ComputeSongEnd(chart, clip);
 
-            // 提前安排起播：调用到真出声之间的延迟由音频系统兜住
+            // 提前安排起播：调用到真正出声之间的延迟由音频系统兜着
             if (clip != null && musicSource != null) musicSource.PlayScheduled(_dspSongStart);
 
             if (spawner != null) spawner.LoadChart(chart);
@@ -322,7 +323,7 @@ namespace My4KGame
 
             IsNewBest = SaveData.Submit(ChartName, Score.Score, Score.Rank, Score.Accuracy);
             SetState(GameState.Result);
-            Debug.Log("[My4KGame] 本局成绩 — " + Score.Summary() + (IsNewBest ? "  ★ 新纪录！" : ""));
+            Debug.Log("[My4KGame] 本局成绩 ——" + Score.Summary() + (IsNewBest ? "  ★新纪录！" : ""));
             SongFinished?.Invoke(Score);
         }
 
@@ -431,18 +432,46 @@ namespace My4KGame
             return result;
         }
 
+        /// <summary>
+        /// 暂停界面：按任意 D/F/J/K 继续游戏。
+        /// 这里只负责恢复，同一帧不再把它当打击按键处理，避免"继续"顺手吃掉一个音符。
+        /// </summary>
+        private void HandlePausedInput()
+        {
+            if (State != GameState.Paused) return;
+            if (keys == null || keys.Length < PlayfieldLayout.LaneCount) return;
+
+            for (int lane = 0; lane < PlayfieldLayout.LaneCount; lane++)
+            {
+                if (Input.GetKeyDown(keys[lane]))
+                {
+                    Resume();
+                    return;
+                }
+            }
+        }
+
         private void HandleGlobalKeys()
         {
-            if (!Input.GetKeyDown(KeyCode.Escape)) return;
-            switch (State)
+            if (Input.GetKeyDown(KeyCode.Escape))
             {
-                case GameState.Playing:
-                case GameState.Paused:
-                    TogglePause();
-                    break;
-                case GameState.Result:
-                    EnterMenu();
-                    break;
+                switch (State)
+                {
+                    case GameState.Playing:
+                        Pause();
+                        break;
+                    case GameState.Paused:
+                        EnterMenu();
+                        break;
+                    case GameState.Result:
+                        EnterMenu();
+                        break;
+                }
+            }
+
+            if (State == GameState.Result && Input.GetKeyDown(KeyCode.R))
+            {
+                Restart();
             }
         }
 

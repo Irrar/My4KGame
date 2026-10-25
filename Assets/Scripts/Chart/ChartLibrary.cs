@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -25,10 +25,30 @@ namespace My4KGame
     }
 
     /// <summary>
+    /// 一首歌：把同一曲名下的多个难度谱面归到一起，供歌曲选择界面用。
+    /// </summary>
+    public sealed class SongEntry
+    {
+        /// <summary>歌曲显示名（取谱面里的 songName；纯数组谱面则退回文件名）。</summary>
+        public string Name;
+
+        /// <summary>分组键，用于在重新扫描后保留当前选中的歌曲。</summary>
+        public string Key;
+
+        /// <summary>这首歌下面的难度谱面列表（按难度排序）。</summary>
+        public List<ChartEntry> Charts = new List<ChartEntry>();
+
+        /// <summary>封面（曲绘）。优先读 Art/Covers/&lt;曲名&gt;，找不到就用生成的占位图。</summary>
+        public Sprite Cover;
+
+        public int DifficultyCount => Charts == null ? 0 : Charts.Count;
+    }
+
+    /// <summary>
     /// 谱面仓库：把 Assets/Resources/Charts 下所有 json 读成 <see cref="ChartData"/>。
     ///
     /// 两种格式都支持（这是故意做的兼容）：
-    ///   1. 手册第 6 章那种"纯数组" —— [ {"time":2.0,"lane":0}, ... ]
+    ///   1. 手册第 6 章那种纯数组 —— [ {"time":2.0,"lane":0}, ... ]
     ///   2. 本工程生成的"带元数据对象" —— { "songName":..., "notes":[ ... ] }
     ///
     /// 用 Resources 而不是 StreamingAssets，是因为 Resources.Load 在编辑器和
@@ -39,14 +59,19 @@ namespace My4KGame
         public const string ResourceFolder = "Charts";
 
         private static List<ChartEntry> _entries;
+        private static List<SongEntry> _songs;
 
         /// <summary>所有谱面（按难度排序）。第一次访问时自动加载。</summary>
         public static IReadOnlyList<ChartEntry> Entries => _entries ?? (_entries = LoadAll());
 
-        /// <summary>强制重新扫描一遍 Resources/Charts（编辑器里改完 json 可以调它）。</summary>
+        /// <summary>所有歌曲（按歌名分组，歌名排序）。第一次访问时自动加载。</summary>
+        public static IReadOnlyList<SongEntry> Songs => _songs ?? (_songs = BuildSongs(Entries));
+
+        /// <summary>强制重新扫一遍 Resources/Charts（编辑器里改完 json 可以调它）。</summary>
         public static IReadOnlyList<ChartEntry> Reload()
         {
             _entries = LoadAll();
+            _songs = null;
             return _entries;
         }
 
@@ -96,6 +121,67 @@ namespace My4KGame
             return string.Compare(a.ResourceName, b.ResourceName, StringComparison.Ordinal);
         }
 
+        private static List<SongEntry> BuildSongs(IReadOnlyList<ChartEntry> entries)
+        {
+            var groups = new Dictionary<string, SongEntry>();
+
+            foreach (ChartEntry entry in entries)
+            {
+                if (entry == null) continue;
+                string name = SongNameOf(entry);
+                if (string.IsNullOrEmpty(name)) name = entry.ResourceName;
+
+                if (!groups.TryGetValue(name, out SongEntry song))
+                {
+                    song = new SongEntry { Name = name, Key = name };
+                    groups.Add(name, song);
+                }
+                song.Charts.Add(entry);
+            }
+
+            var list = new List<SongEntry>(groups.Values);
+            list.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.Ordinal));
+
+            foreach (SongEntry song in list)
+            {
+                song.Charts.Sort((a, b) => CompareEntries(a, b));
+                song.Cover = LoadCover(song);
+            }
+
+            return list;
+        }
+
+        private static string SongNameOf(ChartEntry entry)
+        {
+            if (entry.Chart == null) return entry.ResourceName;
+            string name = entry.Chart.songName;
+            if (string.IsNullOrEmpty(name) || name == "未命名曲目") return entry.ResourceName;
+            return name;
+        }
+
+        private static Sprite LoadCover(SongEntry song)
+        {
+            if (song == null) return SpriteFactory.Cover(null);
+
+            // 1) 先按曲名找 Art/Covers/<曲名>
+            Sprite named = LoadCoverSprite("Covers/" + song.Name);
+            if (named != null) return named;
+
+            // 2) 退而求其次，按曲名直接找 Art/<曲名>
+            named = LoadCoverSprite(song.Name);
+            if (named != null) return named;
+
+            // 3) 都没有就用代码生成的占位图
+            return SpriteFactory.Cover(song.Name);
+        }
+
+        private static Sprite LoadCoverSprite(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return null;
+            Sprite sprite = Resources.Load<Sprite>("Art/" + path);
+            return sprite;
+        }
+
         /// <summary>按 Resources 名查一张谱面。</summary>
         public static ChartEntry Find(string resourceName)
         {
@@ -121,7 +207,7 @@ namespace My4KGame
                 return entry.IsValid;
             }
 
-            // 不在目录里（可能是刚拖进来的、或名字写错了）——再直接尝试按路径读一次
+            // 不在目录里（可能是刚拖进来的、或名字写错了）——再直接按路径读一次
             var asset = Resources.Load<TextAsset>(ResourceFolder + "/" + resourceName);
             if (asset == null)
             {
@@ -169,7 +255,7 @@ namespace My4KGame
 
             if (chart.notes == null) chart.notes = new List<NoteData>();
 
-            // JsonUtility 在字段缺失时可能保留字段初始值，也可能不保留，这里统一兜底
+            // JsonUtility 在字段缺失时可能保留初始值，也可能不保留，这里统一兜底
             if (string.IsNullOrEmpty(chart.songName)) chart.songName = "未命名曲目";
             if (string.IsNullOrEmpty(chart.audio)) chart.audio = "NeonPulse";
             if (string.IsNullOrEmpty(chart.difficulty)) chart.difficulty = "Custom";
@@ -177,9 +263,9 @@ namespace My4KGame
             if (chart.bpm <= 0f) chart.bpm = 120f;
 
             // ============================================================
-            // 判定时间戳的"唯一一次"计算（整个工程只在这里做）
-            //   毫秒 = (有 beat 就用 BPM 换算，否则直接用 time) + offset
-            // 算完之后烘进 NoteData.JudgeTimeMs，之后任何代码都不再改它：
+            // 判定时间戳的"唯一一次"计算（整个工程只在这里做）：
+            //   毫秒 = (没写 beat 就用 BPM 换算，否则直接用 time) + offset
+            // 算完之后烘进 NoteData.JudgeTimeMs，之后任何代码都不再改它。
             // 调速不改、暂停不改、视觉位置也不回写。
             // ============================================================
             double offsetMs = chart.offset * 1000.0;
@@ -211,7 +297,6 @@ namespace My4KGame
 
             chart.notes = cleaned;
             chart.offset = 0f;   // 偏移已经烘进每个音符，之后不再需要
-
             chart.notes.Sort((a, b) => a.JudgeTimeMs.CompareTo(b.JudgeTimeMs));
 
             if (cleaned.Count == 0)

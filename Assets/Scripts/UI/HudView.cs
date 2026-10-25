@@ -1,15 +1,15 @@
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.UI;
 
 namespace My4KGame
 {
     /// <summary>
-    /// 游戏中的抬头显示：分数、准确率、连击、判定文字、倒计时、进度条、键位提示。
+    /// 游戏中的抬头显示：分数、准确率、连击、判定文字、倒计时、进度条、键位提示、暂停弹窗。
     ///
     /// 两个设计细节，都是"手感"层面的：
     ///   1. 判定文字贴在世界坐标上（判定线上方 1 米），窗口怎么缩放都不会跑位；
     ///   2. 连击数变化时会弹一下（放大再回落），让玩家用余光也知道自己连上了，
-    ///      不用盯着数字看 —— 音游里眼睛应该留给下落的音符。
+    ///      不用盯着数字看——音游里眼睛应该留给下落的音符。
     /// </summary>
     [DisallowMultipleComponent]
     public sealed class HudView : MonoBehaviour
@@ -41,6 +41,11 @@ namespace My4KGame
         public Text speedValueText;
         public TapRepeatButton speedMinusButton;
         public TapRepeatButton speedPlusButton;
+
+        [Header("暂停弹窗")]
+        public RectTransform pauseOverlay;
+        public Text pauseTitle;
+        public Text pauseHint;
 
         private GameManager _game;
         private Camera _camera;
@@ -177,8 +182,54 @@ namespace My4KGame
                 autoPlayHint.gameObject.SetActive(false);
             }
 
+            EnsurePauseOverlay();
+
             // 一开始是选曲界面，HUD 先藏起来
             SetVisible(false);
+        }
+
+        // ================================================================ 暂停弹窗
+        /// <summary>
+        /// 暂停时盖一层半透明背景 + 居中提示：
+        /// 按任意 D/F/J/K 继续，Esc 返回主界面。
+        /// </summary>
+        private void EnsurePauseOverlay()
+        {
+            if (root == null) return;
+
+            Transform existing = root.Find("PauseOverlay");
+            if (existing != null)
+            {
+                if (pauseOverlay == null) pauseOverlay = (RectTransform)existing;
+                if (pauseTitle == null)
+                {
+                    Transform t = existing.Find("PauseTitle");
+                    if (t != null) pauseTitle = t.GetComponent<Text>();
+                }
+                if (pauseHint == null)
+                {
+                    Transform t = existing.Find("PauseHint");
+                    if (t != null) pauseHint = t.GetComponent<Text>();
+                }
+                pauseOverlay.gameObject.SetActive(false);
+                return;
+            }
+
+            Image overlay = UiFactory.CreateImage(root, "PauseOverlay", new Color(0f, 0f, 0f, 0.72f));
+            pauseOverlay = overlay.rectTransform;
+            UiFactory.Stretch(pauseOverlay);
+
+            pauseTitle = UiFactory.CreateOutlinedText(pauseOverlay, "PauseTitle", "已暂停", 84, Theme.TextPrimary);
+            UiFactory.Place(pauseTitle.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0f, 90f),
+                new Vector2(900f, 120f));
+
+            pauseHint = UiFactory.CreateText(pauseOverlay, "PauseHint",
+                "按 D / F / J / K 继续游戏    ·    Esc 返回主界面", 30,
+                new Color(1f, 1f, 1f, 0.85f));
+            UiFactory.Place(pauseHint.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0f, -10f),
+                new Vector2(1400f, 50f));
+
+            pauseOverlay.gameObject.SetActive(false);
         }
 
         // ================================================================ 游戏内流速悬浮窗
@@ -232,7 +283,7 @@ namespace My4KGame
         /// <summary>
         /// 重新绑定悬浮窗左右箭头的回调。
         /// `TapRepeatButton` 用 C# `Action` 存回调，Unity 不序列化委托 ——
-        /// 场景里存下来的按钮回到运行时回调是 null，必须每次进游戏重绑。
+        /// 场景里存下来的按钮回调到运行时是 null，必须每次进游戏重绑。
         /// </summary>
         private void BindSpeedPanelButtons()
         {
@@ -339,17 +390,22 @@ namespace My4KGame
             bool visible = state == GameState.Countdown || state == GameState.Playing ||
                            state == GameState.Paused || state == GameState.Result;
             SetVisible(visible);
+
+            if (pauseOverlay != null) pauseOverlay.gameObject.SetActive(state == GameState.Paused);
+
             if (!visible) return;
 
             if (countdownText != null) countdownText.gameObject.SetActive(state == GameState.Countdown);
             if (hintText != null)
             {
-                hintText.text = state == GameState.Paused ? "已暂停 · Esc 继续" : "Esc 暂停 · ↑↓ 调速";
+                hintText.text = state == GameState.Paused
+                    ? "按 D/F/J/K 继续 · Esc 返回主界面"
+                    : "Esc 暂停 · ↑↓ 调速";
             }
         }
 
         /// <summary>
-        /// 用 CanvasGroup 而不是 SetActive 来隐藏 HUD：
+        /// 用 CanvasGroup 而不是 SetActive 来隐藏 HUD，
         /// 这样组件本身始终活着，事件订阅不会断，切回来时不用重新绑定。
         /// </summary>
         public void SetVisible(bool visible)

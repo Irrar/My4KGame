@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.UI;
 
 namespace My4KGame
@@ -155,7 +155,26 @@ namespace My4KGame
             _game.StateChanged += OnStateChanged;
             _bound = true;
 
+            // 场景里保存下来的按钮，其 onClick（代码里挂的委托）不会跟着保存，
+            // 所以每次进运行都要重新绑一遍，否则鼠标点了没反应。
+            BindButtons();
+
             SetVisible(_game.State == GameState.Result);
+        }
+
+        /// <summary>重新绑定按钮点击。先清空再加，保证重复调用也不会叠加。</summary>
+        private void BindButtons()
+        {
+            if (retryButton != null)
+            {
+                retryButton.onClick.RemoveAllListeners();
+                retryButton.onClick.AddListener(OnRetry);
+            }
+            if (menuButton != null)
+            {
+                menuButton.onClick.RemoveAllListeners();
+                menuButton.onClick.AddListener(OnMenu);
+            }
         }
 
         private void OnStateChanged(GameState state)
@@ -182,15 +201,15 @@ namespace My4KGame
             }
             if (songText != null && _game != null && _game.Chart != null)
             {
-                songText.text = $"{_game.Chart.songName}   ·   {_game.Chart.difficulty} Lv.{_game.Chart.level}";
+                songText.text = $"{_game.Chart.songName}    ·   {_game.Chart.difficulty} Lv.{_game.Chart.level}";
             }
             if (scoreText != null) scoreText.text = score.Score.ToString("N0");
-            if (accuracyText != null) accuracyText.text = $"准确率  {score.Accuracy:F2}%";
+            if (accuracyText != null) accuracyText.text = $"准确率 {score.Accuracy:F2}%";
             if (comboText != null)
             {
                 comboText.text = score.IsFullCombo
-                    ? $"最大连击  {score.MaxCombo}   （全连！）"
-                    : $"最大连击  {score.MaxCombo}";
+                    ? $"最大连击 {score.MaxCombo}   （全连！）"
+                    : $"最大连击 {score.MaxCombo}";
             }
             if (detailText != null)
             {
