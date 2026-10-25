@@ -283,11 +283,13 @@ namespace My4KGame
             Score.Begin(chart.NoteCount);
 
             AudioClip clip = LoadChartAudio(chart);
+            float audioStart = AudioTimeline.StartOffset(chart.audio);
             if (musicSource != null)
             {
                 musicSource.Stop();
                 musicSource.clip = clip;
-                musicSource.time = 0f;
+                // 跳过开头静音：直接定位到第一个有声的位置再起播
+                musicSource.time = audioStart;
             }
             if (clip == null)
             {
@@ -322,7 +324,9 @@ namespace My4KGame
         private double ComputeSongEnd(ChartData chart, AudioClip clip)
         {
             double noteEnd = chart.LastNoteTime + 2.0;
-            double musicEnd = clip != null && clip.length > 1.0 ? clip.length : double.MaxValue;
+            double musicEnd = clip != null && clip.length > 1.0
+                ? AudioTimeline.EffectiveLength(chart.audio, clip.length)
+                : double.MaxValue;
             double end = Math.Min(noteEnd, musicEnd);
             return end <= 0.5 ? 1.0 : end;
         }

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -268,7 +268,10 @@ namespace My4KGame
             // 算完之后烘进 NoteData.JudgeTimeMs，之后任何代码都不再改它。
             // 调速不改、暂停不改、视觉位置也不回写。
             // ============================================================
-            double offsetMs = chart.offset * 1000.0;
+            double offsetMs = chart.offset * 1000.0
+                              // 曲子开头的静音会被跳过（播放在 AudioTimeline 里处理），
+                              // 所以音符时间也要整体前移同样的量，否则会对不上。
+                              - AudioTimeline.StartOffset(chart.audio) * 1000.0;
 
             int badLane = 0, negativeTime = 0, duplicates = 0, shortHolds = 0;
             var seen = new HashSet<long>();
@@ -282,11 +285,14 @@ namespace My4KGame
                 double judgeTimeMs = (note.beat >= 0f ? chart.BeatToMs(note.beat) : note.time * 1000.0)
                                      + offsetMs;
 
-                if (judgeTimeMs < 0.0 || double.IsNaN(judgeTimeMs) || double.IsInfinity(judgeTimeMs))
+                // 容差 1ms：跳过前奏静音后，原本正好踩在第 0 秒的音符会因为浮点误差
+                // 变成 -0.0001ms，如果按 "< 0" 丢弃，就会把"音乐第一声"那个音符弄丢。
+                if (judgeTimeMs < -1.0 || double.IsNaN(judgeTimeMs) || double.IsInfinity(judgeTimeMs))
                 {
                     negativeTime++;
                     continue;
                 }
+                if (judgeTimeMs < 0.0) judgeTimeMs = 0.0;
 
                 long key = ((long)Math.Round(judgeTimeMs) << 3) | (uint)note.lane;
                 if (!seen.Add(key)) { duplicates++; continue; }

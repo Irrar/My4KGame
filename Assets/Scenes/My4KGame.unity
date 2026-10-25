@@ -2670,7 +2670,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   musicSource: {fileID: 481173884}
   defaultChart: NeonPulse_Normal
-  leadInSeconds: 3
+  leadInSeconds: 2
   perfectWindow: 0.04
   greatWindow: 0.08
   goodWindow: 0.12

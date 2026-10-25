@@ -39,7 +39,7 @@ namespace My4KGame
         public const float JudgeLineWidth = 10.4f;
 
         /// <summary>起播前的准备时间：这段时间歌曲时间是负数，用来跑 3-2-1 倒计时。</summary>
-        public const double DefaultLeadIn = 3.0;
+        public const double DefaultLeadIn = 2.0;
 
         /// <summary>四条轨道的中心 X 坐标。</summary>
         public static readonly float[] LaneX = { -3.75f, -1.25f, 1.25f, 3.75f };

@@ -297,6 +297,24 @@ namespace My4KGame.EditorTools
             }
             Check(nps >= 5.0f, $"Master 平均密度 {nps:0.00} 音符/秒（应 ≥5）");
 
+            // ---- 跳过前奏静音：音乐与时钟必须仍然对齐，否则整套判定都会漂
+            if (gm.musicSource != null && gm.musicSource.clip != null && gm.Chart != null)
+            {
+                double startOffset = AudioTimeline.StartOffset(gm.Chart.audio);
+                double expected = startOffset + gm.CurrentAudioTime;
+                double drift = gm.musicSource.time - expected;
+                Check(Math.Abs(drift) < 0.10,
+                    $"音频位置与歌曲时钟对齐：musicSource {gm.musicSource.time:F2}s / 期望 {expected:F2}s" +
+                    $"（偏移 {startOffset:F2}s，偏差 {drift * 1000:F0}ms）");
+            }
+
+            if (gm.Chart != null)
+            {
+                double firstNote = gm.Chart.FirstNoteTime;
+                Check(firstNote >= 0.0 && firstNote < 0.35,
+                    $"谱面第一个音符已被对齐到 0 秒附近（实际 {firstNote:F2}s）");
+            }
+
             gm.autoPlay = false;
             gm.EnterMenu();
             yield return null;
